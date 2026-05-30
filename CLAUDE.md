@@ -95,8 +95,12 @@ venv first per `firmware/tests/README.md`.
 - Add or update at least one test per PR that isn't documentation-only.
 - On-device tests assert observable behavior (log lines, serial responses),
   never internals.
-- The `"clawlexa booted"` literal in `main/main.c` is part of the test
-  contract — don't rename it without updating `tests/pytest/test_boot.py`.
+- Several boot-log literals are part of the on-device test contract — don't
+  rename one without updating the test that asserts it:
+  - `"clawlexa booted"` (`main/main.c`) → `tests/pytest/test_boot.py`
+  - `"display: ST77916 ready"`, `"panel variant:"` (`main/display.c`) →
+    `tests/pytest/test_display.py`
+  - `"touch: CST816 ready"` (`main/touch.c`) → `tests/pytest/test_display.py`
 
 ## Hardware notes
 
