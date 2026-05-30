@@ -167,10 +167,17 @@ calendar reminder), tap-to-confirm flows, swipe to dismiss.
 **Decided:**
 - Display state is driven by the agent via `set_state` / `show`, not inferred
   on-device. Keeps the firmware dumb.
+- **UI framework: LVGL**, via the `esp_lvgl_port` managed component (LVGL 9).
+  Hand-rolling anti-aliased arcs/text on a round panel isn't worth it, and the
+  eventual status indicator (§8 "Later") wants a real widget toolkit. Panel
+  driver is `esp_lcd_st77916` (QSPI); touch is `esp_lcd_touch_cst816s`.
+- **Panel reset is gated by a PCA9554 IO expander** (not a direct GPIO) — the
+  init path must pulse LCD reset through the expander before talking to the
+  ST77916, and pass `reset_gpio_num = -1` to the panel driver. See
+  [hardware/PINOUT.md](./hardware/PINOUT.md) for the confirmed C-variant pin
+  map.
 
 **Open:**
-- UI framework on-device: LVGL (heavy, polished) vs raw framebuffer drawing
-  (lean, ugly). Waveshare ships LVGL examples — probably just use that.
 - How to represent "agent is thinking" visually on a round screen — a
   rotating arc seems obvious.
 
@@ -280,6 +287,6 @@ A single list to make easy to triage; each links to its section above.
 - [ ] TTS engine default (§6)
 - [ ] Wake-word engine: microWakeWord vs ESP-Skainet (§7)
 - [ ] Actual wake word phrase (§7)
-- [ ] On-device UI framework (§8)
+- [x] ~~On-device UI framework~~ → LVGL via `esp_lvgl_port` (§8)
 - [x] ~~Firmware framework~~ → ESP-IDF + `idf.py`, v5.4+ (§9)
 - [ ] Bridge language: Python vs Rust/Go (§10)

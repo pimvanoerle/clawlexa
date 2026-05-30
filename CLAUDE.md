@@ -31,9 +31,32 @@ agent loop) happens on the host.
 - **Firmware and bridge are independent code trees.** Changes that span both
   should be obvious in the diff (e.g. the wire protocol changing) and called
   out in the commit message.
-- **No code exists yet.** This is Phase 0. Don't fabricate file paths, build
-  commands, or test commands in this file until they actually work. Update
-  this section the moment the first `firmware/` or `bridge/` project lands.
+- **Don't fabricate file paths, build commands, or test commands** in this
+  file until they actually work. The `firmware/` tree exists as of Phase 1a;
+  the `bridge/` tree does not yet — don't document it until it lands.
+
+## Post-training task ideas (running log)
+
+This repo doubles as a source of post-training exercises for *other* models.
+Bring-up work on this board has a lot of cross-model footguns (the C-vs-non-C
+pinout, the QSPI panel, the IO-expander-gated reset, ESP-IDF version drift),
+which makes "check out commit `<sha>` and get the Waveshare board up" a strong,
+verifiable eval.
+
+So, while implementing phases:
+
+- **Split work into self-contained commits that each build and pass tests on
+  their own.** A reviewer model should be able to `git checkout <sha>`, run the
+  documented build/test commands, and land in a known-good state. Call out in
+  the commit message what state that commit leaves the tree in.
+- **Prefer commit boundaries that make good standalone tasks** — "add these
+  managed components and make it build", "bring up the panel", "make the host
+  tests green", "refactor IO out of the testable core". These are exactly the
+  shapes that exercise a model well.
+- **Log candidate exercises in [task_ideas.md](./task_ideas.md)** as you go:
+  the anchor commit (or "after this PR"), the prompt you'd give the model, and
+  what "done correctly" looks like (the observable check). Keep it append-only;
+  prune only things that stopped being true.
 
 ## Commands
 
