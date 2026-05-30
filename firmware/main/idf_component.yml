@@ -1,6 +1,17 @@
 ## clawlexa main component dependencies.
 ## Managed components land in firmware/managed_components/ (gitignored).
-## We add display/audio/wake-word deps in later phases.
+## Exact versions are pinned in firmware/dependencies.lock (committed).
+##
+## Display/touch stack for the ESP32-S3-Touch-LCD-1.85C:
+##   esp_lcd_st77916          QSPI round panel driver
+##   esp_io_expander_tca9554  drives the PCA9554 (TCA-register-compatible);
+##                            LCD reset hangs off expander pin 2, not a GPIO
+##   esp_lvgl_port            LVGL 9 integration (decided UI framework, SPEC §8)
+##   esp_lcd_touch_cst816s    capacitive touch over I2C
 dependencies:
   idf:
-    version: ">=5.4.0"
+    version: '>=5.4.0'
+  espressif/esp_lcd_st77916: '^2.0.2'
+  espressif/esp_io_expander_tca9554: '^2.0.3'
+  espressif/esp_lvgl_port: '^2.8.0'
+  espressif/esp_lcd_touch_cst816s: '^1.1.1'
