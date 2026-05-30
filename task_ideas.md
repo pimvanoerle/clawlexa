@@ -25,9 +25,13 @@ headless in Docker (`espressif/idf` image); only tier 5 needs hardware.
   `reset_gpio_num=-1`, right init array, clear-before-LVGL). Harness lives in
   `tests/host/fakes/` (`fake_idf.h` + path-stubs + `fake_idf.c`); extend its
   surface as new IO modules need it.
-- **T4 QEMU** — `pytest-embedded-qemu` boot smoke. Catches panics / early-log
-  regressions for logic-only firmware. Note: QEMU has no ST77916/CST816 model,
-  so the display/touch path only runs here if guarded behind a fake board impl.
+- **T4 QEMU** — boot smoke on the **headless build** (`CONFIG_CLAWLEXA_HEADLESS=y`,
+  see `firmware/sdkconfig.qemu`), which skips the LCD/touch init QEMU can't model
+  and lets the banner + heartbeat run. Catches panics / early-log regressions for
+  the logic-only boot path. Runs in the Docker CI image (it ships Espressif's
+  QEMU fork + deps); **not runnable locally here** — mainline `qemu-system-xtensa`
+  has no esp32 machine, and Espressif's fork needs `libgcrypt` which isn't
+  installed. Wire the `pytest-embedded-qemu` test once running in that image.
 - **T5 Device** — real board. The only tier that confirms actual pixels/taps.
 
 When a task is T5-only at face value, decompose it: list the device-free slices

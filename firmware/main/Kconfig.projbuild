@@ -1,0 +1,14 @@
+menu "clawlexa"
+
+config CLAWLEXA_HEADLESS
+    bool "Headless mode (skip display/touch bring-up)"
+    default n
+    help
+        Skip peripheral (display, touch) initialization in app_main. Intended
+        for emulation (QEMU) or host CI where the LCD/touch hardware is absent
+        and their init would abort. The boot banner and heartbeat still run, so
+        the core boot path can be smoke-tested without a board.
+
+        Leave disabled (n) for real-hardware builds.
+
+endmenu

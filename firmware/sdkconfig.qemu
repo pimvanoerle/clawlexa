@@ -1,0 +1,12 @@
+# Extra sdkconfig defaults for the QEMU / headless smoke build.
+#
+# Build it as a separate config, e.g.:
+#   idf.py -B build_qemu -DSDKCONFIG=build_qemu/sdkconfig \
+#     -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.qemu" \
+#     build
+#   idf.py -B build_qemu qemu   # needs Espressif's QEMU fork (ships in the
+#                               # espressif/idf Docker image)
+#
+# Skips LCD/touch bring-up (QEMU has no ST77916/CST816 model), so the core boot
+# path -- banner + heartbeat -- runs cleanly under emulation. See task_ideas.md T4.
+CONFIG_CLAWLEXA_HEADLESS=y

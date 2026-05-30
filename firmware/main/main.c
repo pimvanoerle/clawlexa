@@ -27,10 +27,17 @@ static void log_boot_banner(void) {
 void app_main(void) {
     log_boot_banner();
 
+#if CONFIG_CLAWLEXA_HEADLESS
+    /* Emulation / host-CI build: no LCD or touch hardware present. Skip their
+     * bring-up so the boot path (logging, heartbeat) can be smoke-tested in
+     * QEMU without the peripheral init aborting. */
+    ESP_LOGI(TAG, "headless build: skipping display/touch bring-up");
+#else
     /* Phase 1b: bring up the display, then touch on the shared I2C bus. */
     i2c_master_bus_handle_t i2c_bus = NULL;
     ESP_ERROR_CHECK(display_init(&i2c_bus));
     ESP_ERROR_CHECK(touch_init(i2c_bus));
+#endif
 
     /* Phase 1a: heartbeat only. Audio bring-up lands in 1c. */
     TickType_t last_wake = xTaskGetTickCount();
