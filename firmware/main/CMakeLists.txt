@@ -7,6 +7,7 @@ idf_component_register(
     PRIV_REQUIRES
         log
         esp_system
+        esp_psram
         freertos
 )
 
