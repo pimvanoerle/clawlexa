@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 230" width="280" height="230" role="img" aria-label="clawlexa mascot — a happy cartoon crab waving">
+  <title>clawlexa</title>
+  <defs>
+    <radialGradient id="body" cx="50%" cy="32%" r="72%">
+      <stop offset="0%"   stop-color="#ffb594"/>
+      <stop offset="55%"  stop-color="#ff6b3d"/>
+      <stop offset="100%" stop-color="#c93616"/>
+    </radialGradient>
+    <radialGradient id="claw" cx="40%" cy="32%" r="72%">
+      <stop offset="0%"   stop-color="#ffb594"/>
+      <stop offset="100%" stop-color="#b32d10"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Ground shadow -->
+  <ellipse cx="140" cy="210" rx="86" ry="7" fill="#000" opacity="0.16"/>
+
+  <!-- Legs -->
+  <g stroke="#8e2710" stroke-width="6" stroke-linecap="round" fill="none">
+    <path d="M 88 158  Q 70 175 60 202"/>
+    <path d="M 106 168 Q 96 188  90 208"/>
+    <path d="M 122 172 Q 120 192 119 210"/>
+    <path d="M 158 172 Q 160 192 161 210"/>
+    <path d="M 174 168 Q 184 188 190 208"/>
+    <path d="M 192 158 Q 210 175 220 202"/>
+  </g>
+
+  <!-- Arms -->
+  <path d="M 84 125 Q 55 90 48 55" stroke="#8e2710" stroke-width="11" stroke-linecap="round" fill="none"/>
+  <path d="M 196 125 Q 225 90 232 55" stroke="#8e2710" stroke-width="11" stroke-linecap="round" fill="none"/>
+
+  <!-- Left claw -->
+  <g transform="translate(48 52) rotate(-18)">
+    <ellipse cx="0" cy="0" rx="27" ry="22" fill="url(#claw)"/>
+    <path d="M -19 -1 Q 0 -8 19 -1" stroke="#5a1a08" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+    <ellipse cx="-8" cy="-9" rx="9" ry="5" fill="#ffffff" opacity="0.25"/>
+  </g>
+
+  <!-- Right claw -->
+  <g transform="translate(232 52) rotate(18)">
+    <ellipse cx="0" cy="0" rx="27" ry="22" fill="url(#claw)"/>
+    <path d="M -19 -1 Q 0 -8 19 -1" stroke="#5a1a08" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+    <ellipse cx="-8" cy="-9" rx="9" ry="5" fill="#ffffff" opacity="0.25"/>
+  </g>
+
+  <!-- Body -->
+  <ellipse cx="140" cy="125" rx="68" ry="52" fill="url(#body)"/>
+  <ellipse cx="122" cy="103" rx="24" ry="15" fill="#ffffff" opacity="0.22"/>
+
+  <!-- Cheeks -->
+  <ellipse cx="100" cy="138" rx="11" ry="7" fill="#ff4a6a" opacity="0.55"/>
+  <ellipse cx="180" cy="138" rx="11" ry="7" fill="#ff4a6a" opacity="0.55"/>
+
+  <!-- Eyes -->
+  <ellipse cx="118" cy="113" rx="14" ry="17" fill="white" stroke="#1c1c1c" stroke-width="1.6"/>
+  <ellipse cx="162" cy="113" rx="14" ry="17" fill="white" stroke="#1c1c1c" stroke-width="1.6"/>
+
+  <!-- Pupils -->
+  <ellipse cx="121" cy="117" rx="6" ry="8" fill="#1c1c1c"/>
+  <ellipse cx="165" cy="117" rx="6" ry="8" fill="#1c1c1c"/>
+
+  <!-- Sparkles -->
+  <circle cx="124" cy="113" r="2.6" fill="white"/>
+  <circle cx="168" cy="113" r="2.6" fill="white"/>
+  <circle cx="118" cy="123" r="1.4" fill="white"/>
+  <circle cx="162" cy="123" r="1.4" fill="white"/>
+
+  <!-- Smile -->
+  <path d="M 122 145 Q 140 162 158 145" stroke="#4a1505" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+  <!-- Tongue -->
+  <path d="M 134 151 Q 140 157 146 151 Q 140 156 134 151 Z" fill="#ff5a7a"/>
+</svg>
