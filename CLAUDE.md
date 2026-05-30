@@ -37,8 +37,43 @@ agent loop) happens on the host.
 
 ## Commands
 
-_None yet — repo is at Phase 0 (scaffolding). Populate this section once the
-firmware project and bridge are bootstrapped._
+**Firmware build & flash** (ESP-IDF v5.4+, must be sourced first):
+
+```bash
+cd firmware
+idf.py set-target esp32s3      # one-time per checkout
+idf.py build
+idf.py -p <PORT> flash monitor # <PORT> is the USB serial device
+```
+
+**Host unit tests** (no board, no ESP-IDF needed — these run in CI):
+
+```bash
+cmake -B firmware/tests/host/build -S firmware/tests/host
+cmake --build firmware/tests/host/build
+ctest --test-dir firmware/tests/host/build --output-on-failure
+```
+
+**On-device integration tests** (board plugged in, firmware built):
+
+```bash
+cd firmware
+idf.py build
+pytest tests/pytest
+```
+
+The `tests/pytest/` suite uses `pytest-embedded` — install its deps into a
+venv first per `firmware/tests/README.md`.
+
+## Testing rules (Phase 1+)
+
+- Any logic that *can* be tested host-side (no IDF headers, no FreeRTOS, no
+  IO) *must* be — extract it from IO modules until it can.
+- Add or update at least one test per PR that isn't documentation-only.
+- On-device tests assert observable behavior (log lines, serial responses),
+  never internals.
+- The `"clawlexa booted"` literal in `main/main.c` is part of the test
+  contract — don't rename it without updating `tests/pytest/test_boot.py`.
 
 ## Hardware notes
 

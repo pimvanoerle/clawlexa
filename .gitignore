@@ -15,14 +15,15 @@ venv/
 .ruff_cache/
 .mypy_cache/
 
-# ESP-IDF / PlatformIO (firmware)
+# ESP-IDF (firmware)
 build/
+sdkconfig
 sdkconfig.old
-.pio/
-.pioenvs/
-.piolibdeps/
 managed_components/
-dependencies.lock
+# dependencies.lock IS committed — pinned components for reproducible builds.
+# Host-test build dir
+firmware/tests/host/build/
+firmware/tests/pytest/.venv/
 
 # ML / wake-word artifacts
 *.h5

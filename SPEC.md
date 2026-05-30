@@ -176,15 +176,19 @@ calendar reminder), tap-to-confirm flows, swipe to dismiss.
 
 ## 9. Firmware stack
 
-**Open:**
-- ESP-IDF (C, full control, first-class Espressif support) vs Arduino-ESP32
-  (faster bring-up, less mature for audio + LVGL combo on this board) vs
-  **PlatformIO + ESP-IDF** (good middle ground).
-- Whether to start from the Waveshare factory demo and strip it down, or
-  build up from a blank ESP-IDF project.
+**Decided:**
+- **ESP-IDF + `idf.py`** (no PlatformIO wrapper). Espressif's first-party
+  stack, used by their own examples and by `pytest-embedded`. Audio
+  peripherals, LVGL port, and the wake-word libraries (ESP-Skainet,
+  microWakeWord) all target IDF directly.
+- Target **ESP-IDF v5.4+** (board needs S3R8 / QSPI display support).
+- **Managed components** (via `idf_component.yml`) for everything we can —
+  display driver, touch driver, LVGL port, audio codec — rather than vendoring
+  Waveshare's demo wholesale. Vendored code rots.
 
-Leaning: **PlatformIO + ESP-IDF**, starting from the Waveshare LVGL demo so
-display + touch work day one, then bolt on audio and networking.
+**Open:**
+- Whether to ever vendor pieces of the Waveshare factory demo for things the
+  component registry doesn't cover yet.
 
 ## 10. Bridge stack
 
@@ -194,6 +198,33 @@ display + touch work day one, then bolt on audio and networking.
   laptop has the cycles, and we want to iterate fast.
 - Whether to ship as a one-shot script or as a `pipx`-installable CLI
   (`clawlexa-bridge`).
+
+## 10a. Testing strategy
+
+Three layers, with explicit boundaries so each has a job to do and we don't
+end up with one slow flaky suite.
+
+**Layer 1 — host unit tests (firmware logic).** Pure C modules with no
+ESP-IDF / hardware dependencies. Compiled with the host toolchain and Unity,
+run as a normal binary. Fast (<1s), runs in CI on every push, no board
+required. Lives in `firmware/tests/host/`.
+
+**Layer 2 — on-device integration tests.** `pytest-embedded` drives a real
+ESP32-S3 over USB-serial, asserts on log output and serial responses. Slow
+(seconds), requires the board, run by humans pre-merge for now. Lives in
+`firmware/tests/pytest/`. Self-hosted HiL CI is a stretch goal.
+
+**Layer 3 — bridge unit tests.** Standard `pytest` for the host bridge, with
+fakes for the device-side protocol. Lives in `bridge/tests/` (Phase 2+).
+
+**Rules of the road:**
+- Anything that can be tested at Layer 1 *must* be — i.e. protocol parsers,
+  state machines, ring buffers, codec framing. Don't put non-IO logic inside
+  IO modules.
+- Layer 2 tests assert *observable* behavior (boot logs, serial responses),
+  not internals.
+- Every PR has at least one test added or modified, unless it's purely
+  documentation. CI enforces no regressions; reviewers enforce the spirit.
 
 ## 11. Repo layout (intended)
 
@@ -250,5 +281,5 @@ A single list to make easy to triage; each links to its section above.
 - [ ] Wake-word engine: microWakeWord vs ESP-Skainet (§7)
 - [ ] Actual wake word phrase (§7)
 - [ ] On-device UI framework (§8)
-- [ ] Firmware framework: ESP-IDF vs Arduino vs PlatformIO (§9)
+- [x] ~~Firmware framework~~ → ESP-IDF + `idf.py`, v5.4+ (§9)
 - [ ] Bridge language: Python vs Rust/Go (§10)

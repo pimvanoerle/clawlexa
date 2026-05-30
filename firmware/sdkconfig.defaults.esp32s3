@@ -1,0 +1,24 @@
+# Board-specific defaults for Waveshare ESP32-S3-Touch-LCD-1.85C.
+# ESP32-S3R8 = 8 MB octal PSRAM, 16 MB flash.
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# Flash: 16 MB QIO @ 80 MHz.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# PSRAM: octal 8 MB on the S3R8.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+# Let dynamic allocations spill into PSRAM when internal RAM is tight.
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# CPU at 240 MHz — we'll have headroom for audio + display.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# Custom partition table (see partitions.csv) — we want a big app slot + room for ML models.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

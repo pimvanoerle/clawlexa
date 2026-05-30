@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: Firmware host unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake build-essential
+      - name: Configure
+        working-directory: firmware/tests/host
+        run: cmake -B build
+      - name: Build
+        working-directory: firmware/tests/host
+        run: cmake --build build --parallel
+      - name: Test
+        working-directory: firmware/tests/host
+        run: ctest --test-dir build --output-on-failure
+
+  firmware-build:
+    name: Firmware build (ESP-IDF v5.4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Espressif's official build action — uses the IDF docker image so the
+      # toolchain is pinned and reproducible. No local IDF install required.
+      - name: Build firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4
+          target: esp32s3
+          path: firmware

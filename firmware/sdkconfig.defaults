@@ -1,0 +1,18 @@
+# Defaults applied on top of board-specific sdkconfig.defaults.esp32s3.
+# Anything *board-independent* goes here.
+
+# Use main task on its own stack with sane size for our future audio + LVGL needs.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Sensible log defaults — INFO at runtime, but allow VERBOSE if rebuilt.
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y
+
+# Compiler: optimize for size by default; debug builds can override.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# Stack-smashing protection on (cheap insurance).
+CONFIG_COMPILER_STACK_CHECK_MODE_STRONG=y
+
+# Newlib: use nano formatting (smaller, no float by default — flip on when we need it).
+CONFIG_NEWLIB_NANO_FORMAT=y

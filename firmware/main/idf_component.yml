@@ -1,0 +1,6 @@
+## clawlexa main component dependencies.
+## Managed components land in firmware/managed_components/ (gitignored).
+## We add display/audio/wake-word deps in later phases.
+dependencies:
+  idf:
+    version: ">=5.4.0"

@@ -1,0 +1,11 @@
+# Partition table for clawlexa on 16 MB flash.
+# Two app slots so OTA is possible later; a storage slot for assets
+# (wake-word model, sound files) once we need it.
+#
+# Name,    Type, SubType,  Offset,   Size,    Flags
+nvs,       data, nvs,      0x9000,   0x6000,
+phy_init,  data, phy,      0xf000,   0x1000,
+factory,   app,  factory,  0x10000,  4M,
+ota_0,     app,  ota_0,    ,         4M,
+ota_1,     app,  ota_1,    ,         4M,
+storage,   data, spiffs,   ,         3M,

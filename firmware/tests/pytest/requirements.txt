@@ -1,0 +1,4 @@
+pytest>=8.0,<9.0
+pytest-embedded>=1.11,<2.0
+pytest-embedded-serial-esp>=1.11,<2.0
+pytest-embedded-idf>=1.11,<2.0
