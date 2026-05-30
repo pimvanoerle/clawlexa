@@ -5,6 +5,7 @@
 #include "esp_psram.h"
 
 #include "app_version.h"
+#include "display.h"
 
 static const char *TAG = "clawlexa";
 
@@ -25,7 +26,10 @@ static void log_boot_banner(void) {
 void app_main(void) {
     log_boot_banner();
 
-    /* Phase 1a: heartbeat only. Display / audio bring-up lands in 1b/1c. */
+    /* Phase 1b: bring up the display and show "hello". */
+    ESP_ERROR_CHECK(display_init(NULL));
+
+    /* Phase 1a: heartbeat only. Audio bring-up lands in 1c. */
     TickType_t last_wake = xTaskGetTickCount();
     uint32_t tick = 0;
     while (1) {

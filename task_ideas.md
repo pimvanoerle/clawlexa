@@ -51,4 +51,28 @@ Append-only; prune only when something stops being true.
   pin 2. A model that passes a reset GPIO to the panel driver, or skips the
   expander entirely, gets a black screen.
 
+### DT-3 — The two-panel-variant init footgun (the hard one)
+- **Anchor:** "add managed components" commit (panel not yet working).
+- **Prompt:** "Get a clean image on the screen — the panel currently shows
+  scrambled stripes."
+- **Done-correctly:** crisp, stable content with a clean background. This is a
+  layered trap that mirrors a real bring-up session:
+  1. The generic `esp_lcd_st77916` default init does NOT drive this panel —
+     output is scrambled. You must supply Waveshare's vendor `init_cmds`.
+  2. **There are TWO panel variants on this board**, needing *different* init
+     arrays. Waveshare's demo picks between them by reading panel register
+     `0x04` over a slow (3 MHz) IO before re-opening at full clock. A model that
+     hardcodes one array has a ~50% chance of a still-scrambled panel. Correct
+     answer replicates the register probe (our board reports `00 02 7f 7f` =
+     "new" variant, which also needs INVON `0x21`).
+  3. LVGL's partial draw buffer only paints dirty regions, so power-on GRAM
+     garbage shows through the undrawn background until you explicitly clear the
+     panel to black once.
+- **Grader signal:** the boot log prints `panel reg 0x04 = ...` and
+  `panel variant: <new|default>`; correct firmware selects to match the board.
+- **Source of truth:** waveshareteam/ESP32-S3-Touch-LCD-1.85C, `main/LCD_Driver/`.
+- **Note:** a residual very-faint mura band on pure black at screen center is a
+  physical panel trait (a solid color fill is perfectly clean) — NOT a bug to
+  chase. Models that rabbit-hole on it are over-fitting.
+
 <!-- Append new ideas below as phases land. -->

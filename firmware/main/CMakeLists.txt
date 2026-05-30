@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "main.c"
         "app_version.c"
+        "display.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
@@ -9,6 +10,11 @@ idf_component_register(
         esp_system
         esp_psram
         freertos
+        driver
+        esp_lcd
+        esp_lcd_st77916
+        esp_io_expander_tca9554
+        esp_lvgl_port
 )
 
 # Stamp the build with a version string so boot logs are traceable.
