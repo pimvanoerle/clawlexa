@@ -86,3 +86,18 @@ target_include_directories(test_display_sequence PRIVATE
 target_link_libraries(test_display_sequence PRIVATE unity)
 add_test(NAME test_display_sequence COMMAND test_display_sequence)
 # -----------------------------------------------------------------------
+
+# --- test_touch_sequence (tier T3: mocked-IO interaction test) -----------
+add_executable(test_touch_sequence
+    test_touch_sequence.c
+    fakes/fake_idf.c
+    "${FIRMWARE_MAIN}/touch.c"
+    "${FIRMWARE_MAIN}/touch_geom.c"
+)
+target_include_directories(test_touch_sequence PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/fakes"
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_touch_sequence PRIVATE unity)
+add_test(NAME test_touch_sequence COMMAND test_touch_sequence)
+# -----------------------------------------------------------------------

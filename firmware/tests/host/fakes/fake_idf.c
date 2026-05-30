@@ -12,6 +12,9 @@ bool         faked_reg04_fail;
 int          faked_panel_reset_gpio;
 uint16_t     faked_init_cmds_size;
 const void  *faked_init_cmds;
+int          faked_touch_int_gpio;
+int          faked_touch_rst_gpio;
+uint16_t     faked_touch_x_max;
 
 void faked_reset(void) {
     s_event_count = 0;
@@ -21,6 +24,9 @@ void faked_reset(void) {
     faked_panel_reset_gpio = 0x7FFFFFFF;  /* sentinel: "not captured" */
     faked_init_cmds_size = 0;
     faked_init_cmds = NULL;
+    faked_touch_int_gpio = 0x7FFFFFFF;
+    faked_touch_rst_gpio = 0x7FFFFFFF;
+    faked_touch_x_max = 0;
 }
 
 void faked_record(const char *event) {
@@ -47,11 +53,21 @@ int faked_index_of(const char *event) {
 /* ---- esp_err -------------------------------------------------------------- */
 const char *esp_err_to_name(esp_err_t err) { (void)err; return "FAKE_ERR"; }
 
+/* ---- handles: hand back non-NULL sentinels -------------------------------- */
+static int s_i2c, s_panel_io, s_panel, s_expander, s_disp, s_obj, s_touch, s_task;
+
 /* ---- freertos ------------------------------------------------------------- */
 void vTaskDelay(TickType_t ticks) { (void)ticks; }
 
-/* ---- handles: hand back non-NULL sentinels -------------------------------- */
-static int s_i2c, s_panel_io, s_panel, s_expander, s_disp, s_obj;
+BaseType_t xTaskCreate(TaskFunction_t fn, const char *name, uint32_t stack,
+                       void *arg, unsigned int prio, TaskHandle_t *out) {
+    (void)fn; (void)name; (void)stack; (void)arg; (void)prio;
+    faked_record("xTaskCreate");
+    if (out) {
+        *out = &s_task;
+    }
+    return pdPASS;  /* deliberately do not run fn (no polling loop in tests) */
+}
 
 esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *cfg,
                              i2c_master_bus_handle_t *ret) {
@@ -113,6 +129,15 @@ esp_err_t esp_lcd_panel_io_del(esp_lcd_panel_io_handle_t io) {
     return ESP_OK;
 }
 
+esp_err_t esp_lcd_new_panel_io_i2c(i2c_master_bus_handle_t bus,
+                                   const esp_lcd_panel_io_i2c_config_t *cfg,
+                                   esp_lcd_panel_io_handle_t *ret) {
+    (void)bus; (void)cfg;
+    faked_record("panel_io_i2c_new");
+    *ret = (esp_lcd_panel_io_handle_t)&s_panel_io;
+    return ESP_OK;
+}
+
 esp_err_t esp_lcd_new_panel_st77916(esp_lcd_panel_io_handle_t io,
                                     const esp_lcd_panel_dev_config_t *cfg,
                                     esp_lcd_panel_handle_t *ret) {
@@ -141,6 +166,32 @@ esp_err_t esp_lcd_panel_draw_bitmap(esp_lcd_panel_handle_t p, int x0, int y0,
                                     int x1, int y1, const void *data) {
     (void)p; (void)x0; (void)y0; (void)x1; (void)y1; (void)data;
     faked_record("panel_draw_bitmap");
+    return ESP_OK;
+}
+
+/* ---- esp_lcd_touch (cst816s) ---------------------------------------------- */
+esp_err_t esp_lcd_touch_new_i2c_cst816s(esp_lcd_panel_io_handle_t io,
+                                        const esp_lcd_touch_config_t *cfg,
+                                        esp_lcd_touch_handle_t *ret) {
+    (void)io;
+    faked_record("cst816s_new");
+    faked_touch_int_gpio = cfg->int_gpio_num;
+    faked_touch_rst_gpio = cfg->rst_gpio_num;
+    faked_touch_x_max = cfg->x_max;
+    *ret = (esp_lcd_touch_handle_t)&s_touch;
+    return ESP_OK;
+}
+
+esp_err_t esp_lcd_touch_read_data(esp_lcd_touch_handle_t tp) {
+    (void)tp;
+    return ESP_OK;
+}
+
+esp_err_t esp_lcd_touch_get_data(esp_lcd_touch_handle_t tp,
+                                 esp_lcd_touch_point_data_t *data,
+                                 uint8_t *cnt, uint8_t max_cnt) {
+    (void)tp; (void)data; (void)max_cnt;
+    *cnt = 0;  /* no touch points in the harness */
     return ESP_OK;
 }
 

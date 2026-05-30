@@ -37,11 +37,24 @@ extern bool         faked_reg04_fail;     /* if true, rx_param returns ESP_FAIL 
 extern int          faked_panel_reset_gpio;   /* captured reset_gpio_num */
 extern uint16_t     faked_init_cmds_size;     /* captured vendor init_cmds_size */
 extern const void  *faked_init_cmds;          /* captured vendor init_cmds ptr */
+extern int          faked_touch_int_gpio;     /* captured touch int_gpio_num */
+extern int          faked_touch_rst_gpio;     /* captured touch rst_gpio_num */
+extern uint16_t     faked_touch_x_max;        /* captured touch x_max */
 
 /* ---- freertos ------------------------------------------------------------- */
 typedef uint32_t TickType_t;
 #define pdMS_TO_TICKS(ms) ((TickType_t)(ms))
 void vTaskDelay(TickType_t ticks);
+
+typedef int BaseType_t;
+typedef void *TaskHandle_t;
+typedef void (*TaskFunction_t)(void *);
+#define pdPASS 1
+#define pdFAIL 0
+/* The fake does NOT run the task fn — it just records the create — so tests
+ * exercise init wiring, not the polling loop. */
+BaseType_t xTaskCreate(TaskFunction_t fn, const char *name, uint32_t stack,
+                       void *arg, unsigned int prio, TaskHandle_t *out);
 
 /* ---- driver/i2c_master ---------------------------------------------------- */
 typedef struct fake_i2c_bus *i2c_master_bus_handle_t;
@@ -113,6 +126,19 @@ esp_err_t esp_lcd_panel_io_rx_param(esp_lcd_panel_io_handle_t io, int cmd,
                                     void *param, size_t size);
 esp_err_t esp_lcd_panel_io_del(esp_lcd_panel_io_handle_t io);
 
+typedef struct {
+    uint32_t dev_addr;
+    void *on_color_trans_done, *user_ctx;
+    int control_phase_bytes;
+    unsigned dc_bit_offset;
+    int lcd_cmd_bits, lcd_param_bits;
+    uint32_t scl_speed_hz;
+    struct { unsigned dc_low_on_data : 1, disable_control_phase : 1; } flags;
+} esp_lcd_panel_io_i2c_config_t;
+esp_err_t esp_lcd_new_panel_io_i2c(i2c_master_bus_handle_t bus,
+                                   const esp_lcd_panel_io_i2c_config_t *cfg,
+                                   esp_lcd_panel_io_handle_t *ret);
+
 typedef struct fake_panel *esp_lcd_panel_handle_t;
 esp_err_t esp_lcd_panel_reset(esp_lcd_panel_handle_t p);
 esp_err_t esp_lcd_panel_init(esp_lcd_panel_handle_t p);
@@ -151,6 +177,33 @@ esp_err_t esp_lcd_new_panel_st77916(esp_lcd_panel_io_handle_t io,
         .pclk_hz = 40 * 1000 * 1000, .trans_queue_depth = 10, \
         .on_color_trans_done = (cb), .user_ctx = (ctx), \
         .lcd_cmd_bits = 32, .lcd_param_bits = 8, .flags = { .quad_mode = true } }
+
+/* ---- esp_lcd_touch (+ cst816s) -------------------------------------------- */
+typedef struct fake_touch *esp_lcd_touch_handle_t;
+typedef struct {
+    uint16_t x_max, y_max;
+    gpio_num_t rst_gpio_num, int_gpio_num;
+    struct { unsigned reset : 1, interrupt : 1; } levels;
+    struct { unsigned swap_xy : 1, mirror_x : 1, mirror_y : 1; } flags;
+} esp_lcd_touch_config_t;
+typedef struct {
+    uint8_t track_id;
+    uint16_t x, y, strength;
+} esp_lcd_touch_point_data_t;
+esp_err_t esp_lcd_touch_read_data(esp_lcd_touch_handle_t tp);
+esp_err_t esp_lcd_touch_get_data(esp_lcd_touch_handle_t tp,
+                                 esp_lcd_touch_point_data_t *data,
+                                 uint8_t *cnt, uint8_t max_cnt);
+
+#define ESP_LCD_TOUCH_IO_I2C_CST816S_ADDRESS 0x15
+#define ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG() { \
+        .scl_speed_hz = 100000, .dev_addr = ESP_LCD_TOUCH_IO_I2C_CST816S_ADDRESS, \
+        .on_color_trans_done = 0, .user_ctx = 0, .control_phase_bytes = 1, \
+        .dc_bit_offset = 0, .lcd_cmd_bits = 8, .lcd_param_bits = 0, \
+        .flags = { .dc_low_on_data = 0, .disable_control_phase = 1 } }
+esp_err_t esp_lcd_touch_new_i2c_cst816s(esp_lcd_panel_io_handle_t io,
+                                        const esp_lcd_touch_config_t *cfg,
+                                        esp_lcd_touch_handle_t *ret);
 
 /* ---- esp_io_expander (+ tca9554) ------------------------------------------ */
 typedef struct fake_io_expander *esp_io_expander_handle_t;
