@@ -13,6 +13,7 @@
 #include "esp_lcd_panel_vendor.h"
 #include "esp_lcd_st77916.h"
 #include "st77916_waveshare_init.h"
+#include "st77916_variant.h"
 #include "esp_io_expander_tca9554.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
@@ -80,14 +81,20 @@ static const st77916_lcd_init_cmd_t *select_init_cmds(esp_lcd_panel_io_handle_t 
         ESP_LOGI(TAG, "panel reg 0x04 = %02x %02x %02x %02x", id[0], id[1], id[2], id[3]);
     }
 
-    if (err == ESP_OK && id[0] == 0x00 && id[1] == 0x02 && id[2] == 0x7F && id[3] == 0x7F) {
+    /* Decision logic lives in a pure, host-tested helper (see
+     * tests/host/test_st77916_variant.c). A failed read left id zeroed, which
+     * maps to DEFAULT. */
+    switch (st77916_variant_from_id(id)) {
+    case ST77916_VARIANT_NEW:
         ESP_LOGI(TAG, "panel variant: new");
         *out_size = sizeof(st77916_init_new) / sizeof(st77916_init_new[0]);
         return st77916_init_new;
+    case ST77916_VARIANT_DEFAULT:
+    default:
+        ESP_LOGI(TAG, "panel variant: default");
+        *out_size = sizeof(st77916_init_default) / sizeof(st77916_init_default[0]);
+        return st77916_init_default;
     }
-    ESP_LOGI(TAG, "panel variant: default");
-    *out_size = sizeof(st77916_init_default) / sizeof(st77916_init_default[0]);
-    return st77916_init_default;
 }
 
 /* Install the ST77916 over QSPI. Reset is handled externally (above), so the

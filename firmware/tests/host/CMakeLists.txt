@@ -56,3 +56,16 @@ target_include_directories(test_touch_geom PRIVATE
 target_link_libraries(test_touch_geom PRIVATE unity)
 add_test(NAME test_touch_geom COMMAND test_touch_geom)
 # -----------------------------------------------------------------------
+
+# --- test_st77916_variant -----------------------------------------------
+# Pure panel-variant decision (the DT-3 footgun core), no IDF/IO deps.
+add_executable(test_st77916_variant
+    test_st77916_variant.c
+    "${FIRMWARE_MAIN}/st77916_variant.c"
+)
+target_include_directories(test_st77916_variant PRIVATE
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_st77916_variant PRIVATE unity)
+add_test(NAME test_st77916_variant COMMAND test_st77916_variant)
+# -----------------------------------------------------------------------

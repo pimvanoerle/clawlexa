@@ -3,6 +3,7 @@ idf_component_register(
         "main.c"
         "app_version.c"
         "display.c"
+        "st77916_variant.c"
         "touch.c"
         "touch_geom.c"
     INCLUDE_DIRS
