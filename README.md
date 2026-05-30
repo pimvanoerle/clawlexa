@@ -1,8 +1,16 @@
 # clawlexa
 
-<p align="center">
-  <img src="docs/clawlexa-crab.svg" alt="clawlexa mascot — a happy cartoon crab waving" width="240">
-</p>
+```
+       ___           ___
+      /   \         /   \
+      \___/         \___/
+        \\___________//
+        /   o     o   \
+       |     \___/     |
+        \_____________/
+         |  |  |  |  |
+         v  v  v  v  v
+```
 
 A voice, hearing, and touch interface for Claude-powered agents — built on the
 Waveshare ESP32-S3-Touch-LCD-1.85C.
