@@ -69,3 +69,20 @@ target_include_directories(test_st77916_variant PRIVATE
 target_link_libraries(test_st77916_variant PRIVATE unity)
 add_test(NAME test_st77916_variant COMMAND test_st77916_variant)
 # -----------------------------------------------------------------------
+
+# --- test_display_sequence (tier T3: mocked-IO interaction test) ---------
+# Compiles the real display.c against fake IDF/component headers (fakes/) and
+# asserts the bring-up call sequence + variant selection with no hardware.
+add_executable(test_display_sequence
+    test_display_sequence.c
+    fakes/fake_idf.c
+    "${FIRMWARE_MAIN}/display.c"
+    "${FIRMWARE_MAIN}/st77916_variant.c"
+)
+target_include_directories(test_display_sequence PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/fakes"
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_display_sequence PRIVATE unity)
+add_test(NAME test_display_sequence COMMAND test_display_sequence)
+# -----------------------------------------------------------------------

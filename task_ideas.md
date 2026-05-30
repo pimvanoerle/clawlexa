@@ -22,7 +22,9 @@ headless in Docker (`espressif/idf` image); only tier 5 needs hardware.
   logic: variant selection, geometry, parsers, state machines.
 - **T3 Host-mock** — link firmware logic against fake IDF driver headers, assert
   call *sequence/arguments*. Catches ordering (reset-before-init,
-  `reset_gpio_num=-1`, right init array, clear-before-LVGL). *(harness TBD)*
+  `reset_gpio_num=-1`, right init array, clear-before-LVGL). Harness lives in
+  `tests/host/fakes/` (`fake_idf.h` + path-stubs + `fake_idf.c`); extend its
+  surface as new IO modules need it.
 - **T4 QEMU** — `pytest-embedded-qemu` boot smoke. Catches panics / early-log
   regressions for logic-only firmware. Note: QEMU has no ST77916/CST816 model,
   so the display/touch path only runs here if guarded behind a fake board impl.
@@ -110,11 +112,13 @@ When a task is T5-only at face value, decompose it: list the device-free slices
   | Components added, builds for esp32s3 | T1 | `idf.py build` exits 0 |
   | Variant decision: `st77916_variant_from_id()` maps `{00,02,7f,7f}`→NEW, others→DEFAULT | T2 | `ctest` → `test_st77916_variant` green |
   | Off-glass touches dropped: `touch_in_circle()` | T2 | `ctest` → `test_touch_geom` green |
-  | Call order: expander reset → `reset_gpio_num=-1` → selected init array → GRAM clear → LVGL | T3 | mock records expected call sequence *(harness TBD)* |
+  | Call order: expander reset → `reset_gpio_num=-1` → selected init array → GRAM clear → LVGL | T3 | `ctest` → `test_display_sequence` green |
   | Crisp `hello`, no stripes | T5 | human / device |
 
-  As of the "extract variant decision" commit, slices 1–2 are live: the variant
-  core is a pure function (`main/st77916_variant.c`) with a host test, so the
-  central DT-3 footgun is gradeable with zero hardware.
+  Slices 1–3 are live with zero hardware: the variant core is a pure function
+  (`main/st77916_variant.c`) with a host test, and `test_display_sequence`
+  compiles the real `display.c` against the `tests/host/fakes/` IDF mocks and
+  asserts both the variant selection and the bring-up call order. Only the
+  visible-pixels row needs a board.
 
 <!-- Append new ideas below as phases land. -->
