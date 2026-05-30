@@ -43,3 +43,16 @@ target_compile_definitions(test_app_version PRIVATE
 target_link_libraries(test_app_version PRIVATE unity)
 add_test(NAME test_app_version COMMAND test_app_version)
 # -----------------------------------------------------------------------
+
+# --- test_touch_geom ----------------------------------------------------
+# Pure round-panel geometry, no IDF/IO deps. Self-contained runner.
+add_executable(test_touch_geom
+    test_touch_geom.c
+    "${FIRMWARE_MAIN}/touch_geom.c"
+)
+target_include_directories(test_touch_geom PRIVATE
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_touch_geom PRIVATE unity)
+add_test(NAME test_touch_geom COMMAND test_touch_geom)
+# -----------------------------------------------------------------------

@@ -6,6 +6,7 @@
 
 #include "app_version.h"
 #include "display.h"
+#include "touch.h"
 
 static const char *TAG = "clawlexa";
 
@@ -26,8 +27,10 @@ static void log_boot_banner(void) {
 void app_main(void) {
     log_boot_banner();
 
-    /* Phase 1b: bring up the display and show "hello". */
-    ESP_ERROR_CHECK(display_init(NULL));
+    /* Phase 1b: bring up the display, then touch on the shared I2C bus. */
+    i2c_master_bus_handle_t i2c_bus = NULL;
+    ESP_ERROR_CHECK(display_init(&i2c_bus));
+    ESP_ERROR_CHECK(touch_init(i2c_bus));
 
     /* Phase 1a: heartbeat only. Audio bring-up lands in 1c. */
     TickType_t last_wake = xTaskGetTickCount();

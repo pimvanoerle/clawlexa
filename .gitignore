@@ -17,6 +17,7 @@ venv/
 
 # ESP-IDF (firmware)
 build/
+.cache/
 sdkconfig
 sdkconfig.old
 managed_components/
