@@ -5,14 +5,38 @@ post-training *other* models. See the rationale in
 [CLAUDE.md](./CLAUDE.md#post-training-task-ideas-running-log).
 
 Each entry: **anchor** (commit/PR to check out), **prompt** (what you'd hand
-the model), **done-correctly** (the observable check a grader can run).
-Append-only; prune only when something stops being true.
+the model), **done-correctly** (the observable check a grader can run), and a
+**tier** marking how it can be graded. Append-only; prune only when something
+stops being true.
+
+## Verification tiers
+
+Most footguns split into a *decision/logic core* (gradeable with no board) and a
+*physical effect* (needs the board). Tag each task with the tier(s) it can be
+graded at, so a grader runs the slice that fits the environment. Tiers 1–4 run
+headless in Docker (`espressif/idf` image); only tier 5 needs hardware.
+
+- **T1 Build** — `idf.py build` for esp32s3 succeeds. Catches wrong/missing
+  components, bad APIs, CMake/requires errors.
+- **T2 Host-logic** — pure C unit tests (Unity, `tests/host/`). Catches decision
+  logic: variant selection, geometry, parsers, state machines.
+- **T3 Host-mock** — link firmware logic against fake IDF driver headers, assert
+  call *sequence/arguments*. Catches ordering (reset-before-init,
+  `reset_gpio_num=-1`, right init array, clear-before-LVGL). *(harness TBD)*
+- **T4 QEMU** — `pytest-embedded-qemu` boot smoke. Catches panics / early-log
+  regressions for logic-only firmware. Note: QEMU has no ST77916/CST816 model,
+  so the display/touch path only runs here if guarded behind a fake board impl.
+- **T5 Device** — real board. The only tier that confirms actual pixels/taps.
+
+When a task is T5-only at face value, decompose it: list the device-free slices
+(T1–T4) separately so CI grades the parts a model most often gets wrong.
 
 ---
 
 ## Toolchain & hardware bring-up
 
 ### TI-1 — Get ESP-IDF installed on macOS from a cold machine
+- **Tier:** T5 (host machine state; not Dockerable — it's about the dev's mac).
 - **Anchor:** any commit with `firmware/` present (≥ Phase 1a).
 - **Prompt:** "Install the ESP-IDF toolchain so `idf.py build` works in
   `firmware/`. The user is on macOS with a python.org Python."
@@ -24,6 +48,8 @@ Append-only; prune only when something stops being true.
   without fixing the SSL default path loop forever.
 
 ### TI-2 — Flash and verify first boot
+- **Tier:** T5 device (real boot) — but T4 QEMU can grade the `clawlexa booted`
+  banner headless, since Phase 1a firmware is logic-only (no peripheral init).
 - **Anchor:** Phase 1a tip.
 - **Prompt:** "Build, flash to the board, and prove the firmware is running."
 - **Done-correctly:** captures serial, finds `clawlexa booted` + the 5 s
@@ -34,6 +60,7 @@ Append-only; prune only when something stops being true.
 ## Phase 1b — display + touch bring-up
 
 ### DT-1 — Add the right managed components and keep it building
+- **Tier:** T1 (fully device-free — the whole task is "make it build").
 - **Anchor:** the "docs/spec" commit (before deps are added).
 - **Prompt:** "Add the ESP-IDF managed components needed to drive this board's
   ST77916 QSPI panel through its PCA9554 IO expander, with LVGL and CST816
@@ -43,6 +70,8 @@ Append-only; prune only when something stops being true.
   (TCA vs PCA95xx), or an LVGL major version the port doesn't support.
 
 ### DT-2 — Bring up the panel (hello on screen)
+- **Tier:** T5 for the visible `hello`; T1 (builds) + T3 (reset sequenced via
+  expander before panel init, `reset_gpio_num=-1`) device-free.
 - **Anchor:** the "add managed components" commit.
 - **Prompt:** "Initialize the display and show `hello` centered on the round
   screen."
@@ -74,5 +103,18 @@ Append-only; prune only when something stops being true.
 - **Note:** a residual very-faint mura band on pure black at screen center is a
   physical panel trait (a solid color fill is perfectly clean) — NOT a bug to
   chase. Models that rabbit-hole on it are over-fitting.
+- **Device-free decomposition** (grade the parts models get wrong, no board):
+
+  | Slice | Tier | Grader check |
+  |-------|------|--------------|
+  | Components added, builds for esp32s3 | T1 | `idf.py build` exits 0 |
+  | Variant decision: `st77916_variant_from_id()` maps `{00,02,7f,7f}`→NEW, others→DEFAULT | T2 | `ctest` → `test_st77916_variant` green |
+  | Off-glass touches dropped: `touch_in_circle()` | T2 | `ctest` → `test_touch_geom` green |
+  | Call order: expander reset → `reset_gpio_num=-1` → selected init array → GRAM clear → LVGL | T3 | mock records expected call sequence *(harness TBD)* |
+  | Crisp `hello`, no stripes | T5 | human / device |
+
+  As of the "extract variant decision" commit, slices 1–2 are live: the variant
+  core is a pure function (`main/st77916_variant.c`) with a host test, so the
+  central DT-3 footgun is gradeable with zero hardware.
 
 <!-- Append new ideas below as phases land. -->

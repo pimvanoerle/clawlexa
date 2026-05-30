@@ -57,6 +57,13 @@ So, while implementing phases:
   the anchor commit (or "after this PR"), the prompt you'd give the model, and
   what "done correctly" looks like (the observable check). Keep it append-only;
   prune only things that stopped being true.
+- **Prefer device-free gradeable slices.** Most hardware footguns split into a
+  decision/logic core (testable in Docker via build success, host unit tests, or
+  mocked-IO call-sequence checks) and a physical effect (needs the board). When
+  you write IO code, pull the decision logic into a pure function and host-test
+  it — e.g. `st77916_variant_from_id()` makes the dual-panel footgun gradeable
+  with no hardware. task_ideas.md tags each exercise with a verification tier;
+  keep that honest so a CI grader knows which slice it can run.
 
 ## Commands
 
