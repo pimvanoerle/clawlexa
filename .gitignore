@@ -1,0 +1,37 @@
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Python (bridge)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ESP-IDF / PlatformIO (firmware)
+build/
+sdkconfig.old
+.pio/
+.pioenvs/
+.piolibdeps/
+managed_components/
+dependencies.lock
+
+# ML / wake-word artifacts
+*.h5
+*.tflite
+*.pb
+*.onnx
+wakeword/data/
+wakeword/checkpoints/
+
+# Local secrets / bridge config
+config.local.*
+secrets.*
