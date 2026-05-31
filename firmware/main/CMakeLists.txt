@@ -9,6 +9,8 @@ idf_component_register(
         "audio.c"
         "audio_tone.c"
         "wav.c"
+        "mic.c"
+        "mic_sample.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
@@ -22,6 +24,7 @@ idf_component_register(
         esp_io_expander_tca9554
         esp_lvgl_port
         esp_lcd_touch_cst816s
+        mbedtls
     EMBED_FILES
         "assets/boot.wav"
 )

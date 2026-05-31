@@ -11,4 +11,13 @@ config CLAWLEXA_HEADLESS
 
         Leave disabled (n) for real-hardware builds.
 
+config CLAWLEXA_MIC_DUMP_ON_BOOT
+    bool "Dump a mic recording over serial on boot"
+    default n
+    help
+        Record a few seconds from the mic at boot and dump it as base64 over the
+        console for tools/capture_mic.py. Off by default — it floods the console
+        on every boot. Enable it (or build a dedicated capture image) when you
+        want to grab a recording; mic_init() runs regardless.
+
 endmenu

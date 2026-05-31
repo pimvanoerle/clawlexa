@@ -96,6 +96,19 @@ target_link_libraries(test_wav PRIVATE unity)
 add_test(NAME test_wav COMMAND test_wav)
 # -----------------------------------------------------------------------
 
+# --- test_mic_sample ----------------------------------------------------
+# Pure ICS-43434 raw-32 -> PCM16 conversion, no IDF/IO deps.
+add_executable(test_mic_sample
+    test_mic_sample.c
+    "${FIRMWARE_MAIN}/mic_sample.c"
+)
+target_include_directories(test_mic_sample PRIVATE
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_mic_sample PRIVATE unity)
+add_test(NAME test_mic_sample COMMAND test_mic_sample)
+# -----------------------------------------------------------------------
+
 # --- test_display_sequence (tier T3: mocked-IO interaction test) ---------
 # Compiles the real display.c against fake IDF/component headers (fakes/) and
 # asserts the bring-up call sequence + variant selection with no hardware.

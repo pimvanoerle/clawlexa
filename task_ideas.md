@@ -154,4 +154,18 @@ When a task is T5-only at face value, decompose it: list the device-free slices
   (`assets/boot.wav`), clock retuned to the WAV's rate. Remaining: **1c-b** —
   ICS-43434 I²S mic capture (SCK=15, WS=2, SD=39) → dump over serial → host WAV.
 
+### AU-2 — Capture the mic to a WAV (done, 2026-05-31)
+- **Anchor:** the WAV-playback commit.
+- **Prompt:** "Record a few seconds from the mic and get it onto the laptop as a
+  playable WAV."
+- **Done-correctly:** `mic.c` brings up an I²S RX channel on the ICS-43434
+  (I2S_NUM_1, SCK=15/WS=2/SD=39, no I²C), records to PSRAM, converts 24-bit→16
+  (`mic_sample.c`, host-tested + clamped), and dumps base64 framed over serial;
+  `tools/capture_mic.py` resets the board, reads the block (skipping interleaved
+  log lines), and writes a WAV. Footguns: the mic is a *separate* I²S bus from
+  the speaker DAC (use I2S_NUM_1); it's 24-bit-in-32-bit (read 32-bit slots);
+  raw binary over the console is fragile, so base64 + markers + line filtering.
+- **Device-free slices:** build (T1); the sample conversion `mic_sample_to_pcm16`
+  host test (T2). Only "the recording sounds right" needs the board (T5).
+
 <!-- Append new ideas below as phases land. -->

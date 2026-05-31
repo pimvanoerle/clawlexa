@@ -9,3 +9,8 @@ def test_audio_ready_and_plays(dut):
     dut.expect("display: ST77916 ready", timeout=10)
     dut.expect("audio: PCM5101 ready", timeout=5)
     dut.expect("audio: playing", timeout=5)
+
+
+def test_mic_ready(dut):
+    dut.expect("audio: PCM5101 ready", timeout=10)
+    dut.expect("mic: ICS-43434 ready", timeout=5)

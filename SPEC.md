@@ -257,8 +257,9 @@ Nothing in here yet — created as each phase starts.
 ## 12. Roadmap
 
 - [x] **Phase 0** — repo + spec
-- [ ] **Phase 1** — Hardware bring-up: display "hello", capture mic to local
-      file over USB serial, play a WAV from flash through the speaker.
+- [x] **Phase 1** — Hardware bring-up: display "hello" (LVGL/ST77916) + touch
+      (CST816); play a WAV from flash through the speaker (PCM5101A DAC); capture
+      mic (ICS-43434) to a WAV over USB serial via `firmware/tools/capture_mic.py`.
 - [ ] **Phase 2** — WiFi bring-up + device↔bridge transport. Stream mic audio
       to bridge, stream TTS bytes back.
 - [ ] **Phase 3** — Bridge does STT and TTS round-trip (no agent yet — just a

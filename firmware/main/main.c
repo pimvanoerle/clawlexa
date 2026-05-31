@@ -8,6 +8,7 @@
 #include "display.h"
 #include "touch.h"
 #include "audio.h"
+#include "mic.h"
 
 static const char *TAG = "clawlexa";
 
@@ -47,6 +48,14 @@ void app_main(void) {
     ESP_ERROR_CHECK(audio_play_init());
     ESP_ERROR_CHECK(audio_play_wav(boot_wav_start,
                                    (size_t)(boot_wav_end - boot_wav_start)));
+
+    /* Phase 1c-b: mic. Always bring it up; only auto-dump a recording over
+     * serial (for tools/capture_mic.py) when explicitly built for it, since the
+     * dump floods the console on every boot. */
+    ESP_ERROR_CHECK(mic_init());
+#if CONFIG_CLAWLEXA_MIC_DUMP_ON_BOOT
+    ESP_ERROR_CHECK(mic_capture_and_dump(3));
+#endif
 #endif
 
     /* Phase 1a: heartbeat only. Audio bring-up lands in 1c. */
