@@ -142,5 +142,17 @@ When a task is T5-only at face value, decompose it: list the device-free slices
 - **Device-free slices:** build (T1); sine-buffer fill `audio_fill_sine()` host
   test (T2); audio_init call-sequence — PA enabled, codec opened before write —
   via the fakes harness (T3). Only "I hear it" needs the board (T5).
+- **STATUS (blocked, 2026-05-31):** scaffolding is in (`audio.c`: I2S TX +
+  esp_codec_dev ES8311 at 16k/16/mono; `audio_tone` host-tested). But the
+  **ES8311 does not ACK on I2C** on the bench board — a direct 7-bit probe of
+  0x18 gets nothing, while touch (0x15), the expander (0x20) and the RTC (0x51)
+  all answer. Docs confirm the board *has* ES8311+ES7210, so the chip is held in
+  reset / unpowered by a path not yet found. **Ruled out:** driving all TCA9554
+  expander pins high (the demo brings the codec up *before* its EXIO_Init, so
+  it's not expander-gated); MCLK-before-config (enabling I2S first per the
+  esp_codec_dev test board didn't help). **Next:** get the 1.85C schematic and
+  find the ES8311 RESET/power line (likely an MCU GPIO we're not driving).
+  `audio_play_init` currently probes 0x18 and bails with one warning so boot
+  stays clean.
 
 <!-- Append new ideas below as phases land. -->

@@ -70,6 +70,19 @@ target_link_libraries(test_st77916_variant PRIVATE unity)
 add_test(NAME test_st77916_variant COMMAND test_st77916_variant)
 # -----------------------------------------------------------------------
 
+# --- test_audio_tone ----------------------------------------------------
+# Pure sine-buffer generation for the speaker test tone, no IDF/IO deps.
+add_executable(test_audio_tone
+    test_audio_tone.c
+    "${FIRMWARE_MAIN}/audio_tone.c"
+)
+target_include_directories(test_audio_tone PRIVATE
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_audio_tone PRIVATE unity m)
+add_test(NAME test_audio_tone COMMAND test_audio_tone)
+# -----------------------------------------------------------------------
+
 # --- test_display_sequence (tier T3: mocked-IO interaction test) ---------
 # Compiles the real display.c against fake IDF/component headers (fakes/) and
 # asserts the bring-up call sequence + variant selection with no hardware.

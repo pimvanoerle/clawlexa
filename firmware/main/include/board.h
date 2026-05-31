@@ -32,3 +32,14 @@
 /* CST816 capacitive touch on the shared I2C bus. */
 #define BOARD_TOUCH_ADDR          0x15
 #define BOARD_TOUCH_INT_GPIO      4
+
+/* Audio: ES8311 (play) + ES7210 (capture) on the shared I2C bus, one I2S bus. */
+#define BOARD_I2S_MCLK_GPIO       2
+#define BOARD_I2S_BCLK_GPIO       48
+#define BOARD_I2S_WS_GPIO         38
+#define BOARD_I2S_DOUT_GPIO       47    /* -> ES8311 -> speaker */
+#define BOARD_I2S_DIN_GPIO        39    /* <- ES7210 mic ADC */
+#define BOARD_AUDIO_PA_GPIO       15    /* speaker amplifier enable (active high) */
+/* esp_codec_dev uses 8-bit I2C addresses; a 7-bit bus scan shows these >> 1. */
+#define BOARD_ES8311_ADDR         0x30  /* 7-bit scan: 0x18 */
+#define BOARD_ES7210_ADDR         0x80  /* 7-bit scan: 0x40 */

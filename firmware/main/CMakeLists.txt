@@ -6,6 +6,8 @@ idf_component_register(
         "st77916_variant.c"
         "touch.c"
         "touch_geom.c"
+        "audio.c"
+        "audio_tone.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
@@ -19,6 +21,7 @@ idf_component_register(
         esp_io_expander_tca9554
         esp_lvgl_port
         esp_lcd_touch_cst816s
+        esp_codec_dev
 )
 
 # Stamp the build with a version string so boot logs are traceable.
