@@ -37,3 +37,4 @@ wakeword/checkpoints/
 # Local secrets / bridge config
 config.local.*
 secrets.*
+recordings/

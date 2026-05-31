@@ -45,6 +45,23 @@ esp_err_t mic_init(void) {
     return ESP_OK;
 }
 
+int mic_read_samples(int16_t *out, int max_samples) {
+    if (s_rx == NULL || max_samples <= 0) {
+        return -1;
+    }
+    int32_t raw[READ_CHUNK];
+    int want = max_samples < READ_CHUNK ? max_samples : READ_CHUNK;
+    size_t br = 0;
+    if (i2s_channel_read(s_rx, raw, want * sizeof(int32_t), &br, pdMS_TO_TICKS(1000)) != ESP_OK) {
+        return -1;
+    }
+    int got = (int)(br / sizeof(int32_t));
+    for (int i = 0; i < got; i++) {
+        out[i] = mic_sample_to_pcm16(raw[i]);
+    }
+    return got;
+}
+
 esp_err_t mic_capture_and_dump(uint32_t seconds) {
     ESP_RETURN_ON_FALSE(s_rx, ESP_ERR_INVALID_STATE, TAG, "mic not initialized");
 

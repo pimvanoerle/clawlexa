@@ -48,4 +48,12 @@ config CLAWLEXA_BRIDGE_PORT
     help
         TCP port clawlexa-bridge listens on (default 8765).
 
+config CLAWLEXA_STREAM_MIC_ON_CONNECT
+    bool "Stream a few seconds of mic to the bridge on connect"
+    default n
+    help
+        Once connected to the bridge, stream a short mic recording over the
+        WebSocket (the bridge saves it as a WAV). Phase 2c bring-up behavior —
+        off by default; enable to exercise the device->bridge audio path.
+
 endmenu
