@@ -42,12 +42,31 @@ Devices on the bus: CST816 touch (0x15), PCA9554 IO expander (0x20). The
 QMI8658 IMU, RTC, and audio codec also sit on this board's I²C — addresses TBD,
 documented when those phases land.
 
-## Audio (Phase 1c — not yet wired)
+## Audio — ES8311 (play) + ES7210 (capture), I²S + shared I²C
+
+Both codecs sit on the shared I²C bus (SCL 10 / SDA 11) and share one I²S bus.
 
 | Signal | ESP32-S3 |
 |--------|----------|
-| Speaker I²S DOUT | GPIO47 |
-| (mic + codec pins) | TBD |
+| I²S MCLK | GPIO2 |
+| I²S BCLK (SCLK) | GPIO48 |
+| I²S WS (LRCK) | GPIO38 |
+| I²S DOUT (→ ES8311 → speaker) | GPIO47 |
+| I²S DIN (← ES7210 mic ADC) | GPIO39 |
+| Speaker amp (PA) enable | GPIO15 |
+
+| I²C device | Addr |
+|------------|------|
+| ES8311 playback codec | 0x18 |
+| ES7210 capture ADC | 0x40 |
+
+> **Footgun (PA):** the speaker amplifier is gated by GPIO15 — the demo drives it
+> high around playback. No PA enable ⇒ silent speaker even with a working codec.
+>
+> **Caveat (verify on hardware):** these come from Waveshare's official 1.85C
+> demo, whose audio-board config is **KORVO-2-derived** (a 4-mic ES7210 array).
+> The pins look right, but confirm the codecs by I²C-scanning for 0x18/0x40 at
+> bring-up before trusting them; a one-mic round board may differ.
 
 ## Sources & caveats
 

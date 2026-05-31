@@ -125,4 +125,22 @@ When a task is T5-only at face value, decompose it: list the device-free slices
   asserts both the variant selection and the bring-up call order. Only the
   visible-pixels row needs a board.
 
+## Phase 1c — audio bring-up
+
+### AU-1 — Make the speaker play (tone, then WAV)
+- **Anchor:** the "add esp_codec_dev" commit.
+- **Prompt:** "Play sound out of the speaker — a test tone, then an embedded WAV."
+- **Done-correctly:** audible tone/WAV; log `audio: ES8311 ready` + `audio: playing`.
+  Footguns:
+  1. **PA enable on GPIO15** — the speaker amplifier is gated by a GPIO the codec
+     driver won't touch unless told (`pa_pin`). Miss it ⇒ codec configures fine,
+     log says ready, but the speaker is silent. Classic "looks right, no sound."
+  2. **MCLK required** — ES8311 needs the I²S MCLK (GPIO2); forgetting it ⇒
+     garbled/no output.
+  3. **KORVO-derived demo config** — verify the codec is really ES8311 (0x18) by
+     I²C scan; don't assume the 4-mic ES7210 array config wholesale.
+- **Device-free slices:** build (T1); sine-buffer fill `audio_fill_sine()` host
+  test (T2); audio_init call-sequence — PA enabled, codec opened before write —
+  via the fakes harness (T3). Only "I hear it" needs the board (T5).
+
 <!-- Append new ideas below as phases land. -->

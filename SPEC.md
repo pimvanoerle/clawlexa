@@ -124,6 +124,10 @@ mic ─▶ ring buffer ─▶ wake-word model ─▶ (on trigger) ─▶ stream 
 - STT and TTS run on the bridge (CPU/GPU is free there; keeps firmware lean).
 - Half-duplex for v1 (no barge-in while clawlexa is speaking). Full-duplex
   with echo cancellation is a stretch goal.
+- Device audio I/O is **16 kHz / 16-bit mono PCM** over I²S via the
+  `esp_codec_dev` component: **ES8311** drives the speaker (playback), **ES7210**
+  captures the mic. The speaker amp is gated by a GPIO (PA enable). See
+  [hardware/PINOUT.md](./hardware/PINOUT.md).
 
 **Open:**
 - STT engine: local `whisper.cpp` (offline, free, ~1s latency on M-series)
