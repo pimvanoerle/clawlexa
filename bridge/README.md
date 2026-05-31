@@ -30,3 +30,25 @@ laptop's LAN IP, e.g. `192.168.1.221`.
 
 `tests/test_protocol.py` covers the pure message encode/parse; `test_server.py`
 runs the real handshake over a loopback WebSocket (no device needed).
+
+## Troubleshooting
+
+**Device connects but the link fails (bridge logs `400 Bad Request`; device logs
+`Error read response for Upgrade header`).** If loopback tests pass but the real
+device can't complete the handshake, suspect the **macOS Application Firewall**
+on the bridge host. It can let the TCP handshake through (the kernel even ACKs
+the device's request) yet block the *Python process* from receiving the data, so
+`recv()` raises `OSError: [Errno 57] Socket is not connected` and the server 400s
+— a very misleading symptom that looks like a protocol bug but isn't.
+
+The firewall is per-binary, and a venv built on the python.org framework Python
+is a *different* binary from `/usr/bin/python3`. Allow it:
+
+```bash
+PYBIN=$(.venv/bin/python -c 'import sys; print(sys.executable)')
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$PYBIN"
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$PYBIN"
+```
+
+(or run the bridge from an already-allowed interpreter). Loopback always works
+because it bypasses the firewall — so this only bites the real device.

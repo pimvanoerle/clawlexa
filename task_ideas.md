@@ -168,4 +168,25 @@ When a task is T5-only at face value, decompose it: list the device-free slices
 - **Device-free slices:** build (T1); the sample conversion `mic_sample_to_pcm16`
   host test (T2). Only "the recording sounds right" needs the board (T5).
 
+## Phase 2 — WiFi + device↔bridge link
+
+### NET-1 — Get the device talking to the bridge (the firewall red herring)
+- **Anchor:** the "firmware WebSocket client" commit.
+- **Prompt:** "The device joins WiFi but can't complete the WebSocket handshake
+  with the bridge — the bridge logs 400, the device logs `Error read response
+  for Upgrade header`. Fix it."
+- **Done-correctly:** device logs `ws: <- {welcome...}`; bridge logs the hello +
+  `sent welcome`. The trap: it looks like a protocol/code bug, but the request
+  is valid (capture it with `nc` and replay it → the server returns 101). The
+  real cause is the **macOS Application Firewall** on the host blocking the
+  bridge's (venv/python.org) Python from receiving LAN connections: the TCP
+  handshake completes and the kernel ACKs the request, but the process gets
+  `ENOTCONN` and 400s. Loopback works (bypasses the firewall); `nc` works (an
+  allowed binary). Fix = allow that Python in the firewall, not touch the code.
+  A model that keeps editing the handshake will never succeed.
+- **Device-free slices:** bridge `test_protocol.py` (encode/parse) + `test_server.py`
+  (real handshake over loopback) — both T-equivalent of host tests, no device,
+  and they *pass even when the device link is firewall-blocked*, which is the
+  whole point: the bug is environmental, not in the code.
+
 <!-- Append new ideas below as phases land. -->
