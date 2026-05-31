@@ -9,6 +9,7 @@
 #include "touch.h"
 #include "audio.h"
 #include "mic.h"
+#include "wifi.h"
 
 static const char *TAG = "clawlexa";
 
@@ -56,6 +57,12 @@ void app_main(void) {
 #if CONFIG_CLAWLEXA_MIC_DUMP_ON_BOOT
     ESP_ERROR_CHECK(mic_capture_and_dump(3));
 #endif
+
+    /* Phase 2a: join WiFi. Non-fatal — a bad AP/creds shouldn't brick the
+     * device; the local peripherals already work. */
+    if (wifi_connect() != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi not connected; continuing offline");
+    }
 #endif
 
     /* Phase 1a: heartbeat only. Audio bring-up lands in 1c. */

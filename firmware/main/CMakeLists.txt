@@ -11,6 +11,7 @@ idf_component_register(
         "wav.c"
         "mic.c"
         "mic_sample.c"
+        "wifi.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
@@ -25,6 +26,10 @@ idf_component_register(
         esp_lvgl_port
         esp_lcd_touch_cst816s
         mbedtls
+        esp_wifi
+        esp_netif
+        esp_event
+        nvs_flash
     EMBED_FILES
         "assets/boot.wav"
 )
