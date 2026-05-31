@@ -12,6 +12,7 @@ idf_component_register(
         "mic.c"
         "mic_sample.c"
         "wifi.c"
+        "ws.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
@@ -30,6 +31,7 @@ idf_component_register(
         esp_netif
         esp_event
         nvs_flash
+        esp_websocket_client
     EMBED_FILES
         "assets/boot.wav"
 )

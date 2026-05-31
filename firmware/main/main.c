@@ -10,6 +10,7 @@
 #include "audio.h"
 #include "mic.h"
 #include "wifi.h"
+#include "ws.h"
 
 static const char *TAG = "clawlexa";
 
@@ -58,9 +59,13 @@ void app_main(void) {
     ESP_ERROR_CHECK(mic_capture_and_dump(3));
 #endif
 
-    /* Phase 2a: join WiFi. Non-fatal — a bad AP/creds shouldn't brick the
-     * device; the local peripherals already work. */
-    if (wifi_connect() != ESP_OK) {
+    /* Phase 2a/2b: join WiFi, then dial the bridge over WebSocket. Non-fatal —
+     * a bad AP or absent bridge shouldn't brick the local peripherals. */
+    if (wifi_connect() == ESP_OK) {
+        if (ws_connect() != ESP_OK) {
+            ESP_LOGW(TAG, "bridge link not started");
+        }
+    } else {
         ESP_LOGW(TAG, "WiFi not connected; continuing offline");
     }
 #endif

@@ -35,4 +35,17 @@ config CLAWLEXA_WIFI_PASS
         Password for CLAWLEXA_WIFI_SSID (WPA2). Leave empty for an open network.
         Stored only in your local (gitignored) sdkconfig.
 
+config CLAWLEXA_BRIDGE_HOST
+    string "Bridge host (IP or hostname)"
+    default ""
+    help
+        Host running clawlexa-bridge. The device dials ws://<host>:<port>. Set
+        to the bridge laptop's LAN IP. Empty = don't connect to the bridge.
+
+config CLAWLEXA_BRIDGE_PORT
+    int "Bridge port"
+    default 8765
+    help
+        TCP port clawlexa-bridge listens on (default 8765).
+
 endmenu
