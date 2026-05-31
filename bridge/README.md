@@ -41,13 +41,18 @@ the device's request) yet block the *Python process* from receiving the data, so
 `recv()` raises `OSError: [Errno 57] Socket is not connected` and the server 400s
 — a very misleading symptom that looks like a protocol bug but isn't.
 
-The firewall is per-binary, and a venv built on the python.org framework Python
-is a *different* binary from `/usr/bin/python3`. Allow it:
+The firewall is per-binary. Two gotchas: (1) a venv on the python.org framework
+Python is a *different* binary from `/usr/bin/python3`; (2) the framework's real
+interpreter is the **`Python.app`** executable inside it — allowing
+`bin/python3.12` is **not** enough. Allow the right one, then **restart the
+bridge** (the firewall decides per process launch):
 
 ```bash
-PYBIN=$(.venv/bin/python -c 'import sys; print(sys.executable)')
-sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$PYBIN"
-sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$PYBIN"
+PYAPP="$SROOT/Resources/Python.app/Contents/MacOS/Python"   # $SROOT = sys.base_prefix
+# e.g. /Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$PYAPP"
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$PYAPP"
+# then restart: python -m clawlexa_bridge ...
 ```
 
 (or run the bridge from an already-allowed interpreter). Loopback always works
