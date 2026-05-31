@@ -189,4 +189,16 @@ When a task is T5-only at face value, decompose it: list the device-free slices
   and they *pass even when the device link is firewall-blocked*, which is the
   whole point: the bug is environmental, not in the code.
 
+### NET-2 — Mic recording plays at half speed (I2S mono-RX footgun)
+- **Anchor:** the "stream mic to bridge" commit (before the slot fix).
+- **Prompt:** "The streamed mic recording plays back at half speed / too low."
+- **Done-correctly:** recording plays at normal pitch. Footgun: on ESP32, I2S
+  **RX in `I2S_SLOT_MODE_MONO` still delivers BOTH slots interleaved** (the mono
+  setting mostly affects TX), so you capture 2× the samples → a 16 kHz-labelled
+  WAV runs half-speed. Fix: configure STEREO and take only the mic's slot
+  (here the *right*, index `i*2+1`; the left was silent). Tell: time the stream —
+  3 s of audio finishing in ~1.5 s of wall-clock is the giveaway.
+- **Device-free slice:** none for the timing itself (it's live I2S), but the
+  2×-sample symptom is obvious from the bridge WAV duration vs stream wall-time.
+
 <!-- Append new ideas below as phases land. -->

@@ -20,8 +20,10 @@ static const char *TAG = "mic";
 
 static i2s_chan_handle_t s_rx;
 
-/* RX-only master I2S for the ICS-43434. The mic is 24-bit; we read 32-bit slots
- * (mono left) and convert in mic_sample_to_pcm16. No MCLK, no I2C. */
+/* RX-only master I2S for the ICS-43434 (24-bit, in 32-bit slots; no MCLK/I2C).
+ * NB: ESP32 I2S RX "mono" still delivers BOTH slots interleaved, which doubles
+ * the sample count (recording plays half-speed). So we run STEREO and take the
+ * mic's slot (right) in mic_read_samples — that's the true 16 kHz mono stream. */
 esp_err_t mic_init(void) {
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
     ESP_RETURN_ON_ERROR(i2s_new_channel(&chan_cfg, NULL, &s_rx), TAG, "i2s_new_channel failed");
@@ -29,7 +31,7 @@ esp_err_t mic_init(void) {
     const i2s_std_config_t std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(MIC_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT,
-                                                        I2S_SLOT_MODE_MONO),
+                                                        I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
             .bclk = BOARD_MIC_I2S_SCK_GPIO,
@@ -49,15 +51,18 @@ int mic_read_samples(int16_t *out, int max_samples) {
     if (s_rx == NULL || max_samples <= 0) {
         return -1;
     }
-    int32_t raw[READ_CHUNK];
-    int want = max_samples < READ_CHUNK ? max_samples : READ_CHUNK;
+    /* Stereo frames (L+R) at 16 kHz; the mic is on the left slot, so read pairs
+     * and keep every other 32-bit word -> true 16 kHz mono. */
+    int32_t raw[READ_CHUNK * 2];
+    int frames = max_samples < READ_CHUNK ? max_samples : READ_CHUNK;
     size_t br = 0;
-    if (i2s_channel_read(s_rx, raw, want * sizeof(int32_t), &br, pdMS_TO_TICKS(1000)) != ESP_OK) {
+    if (i2s_channel_read(s_rx, raw, (size_t)frames * 2 * sizeof(int32_t), &br,
+                         pdMS_TO_TICKS(1000)) != ESP_OK) {
         return -1;
     }
-    int got = (int)(br / sizeof(int32_t));
+    int got = (int)(br / (2 * sizeof(int32_t)));
     for (int i = 0; i < got; i++) {
-        out[i] = mic_sample_to_pcm16(raw[i]);
+        out[i] = mic_sample_to_pcm16(raw[i * 2 + 1]);  /* mic is on the right slot */
     }
     return got;
 }
@@ -69,26 +74,21 @@ esp_err_t mic_capture_and_dump(uint32_t seconds) {
     int16_t *pcm = heap_caps_malloc(n_samples * sizeof(int16_t), MALLOC_CAP_SPIRAM);
     ESP_RETURN_ON_FALSE(pcm, ESP_ERR_NO_MEM, TAG, "pcm buffer alloc failed");
 
-    /* Discard ~50 ms while the mic settles after enable. */
-    int32_t raw[READ_CHUNK];
-    size_t junk = 0;
+    /* Discard a little while the mic settles after enable. */
+    int16_t settle[READ_CHUNK];
     for (int i = 0; i < 4; i++) {
-        i2s_channel_read(s_rx, raw, sizeof(raw), &junk, pdMS_TO_TICKS(200));
+        mic_read_samples(settle, READ_CHUNK);
     }
 
     ESP_LOGI(TAG, "capturing %us...", (unsigned)seconds);
     size_t got = 0;
     while (got < n_samples) {
-        size_t want = (n_samples - got < READ_CHUNK) ? (n_samples - got) : READ_CHUNK;
-        size_t br = 0;
-        if (i2s_channel_read(s_rx, raw, want * sizeof(int32_t), &br, pdMS_TO_TICKS(1000)) != ESP_OK) {
+        int want = (n_samples - got < READ_CHUNK) ? (int)(n_samples - got) : READ_CHUNK;
+        int n = mic_read_samples(pcm + got, want);
+        if (n <= 0) {
             break;
         }
-        size_t samples = br / sizeof(int32_t);
-        for (size_t i = 0; i < samples; i++) {
-            pcm[got + i] = mic_sample_to_pcm16(raw[i]);
-        }
-        got += samples;
+        got += n;
     }
 
     /* Dump as base64, framed, for tools/capture_mic.py. Each line encodes a
