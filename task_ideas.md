@@ -130,29 +130,27 @@ When a task is T5-only at face value, decompose it: list the device-free slices
 ### AU-1 — Make the speaker play (tone, then WAV)
 - **Anchor:** the "add esp_codec_dev" commit.
 - **Prompt:** "Play sound out of the speaker — a test tone, then an embedded WAV."
-- **Done-correctly:** audible tone/WAV; log `audio: ES8311 ready` + `audio: playing`.
-  Footguns:
-  1. **PA enable on GPIO15** — the speaker amplifier is gated by a GPIO the codec
-     driver won't touch unless told (`pa_pin`). Miss it ⇒ codec configures fine,
-     log says ready, but the speaker is silent. Classic "looks right, no sound."
-  2. **MCLK required** — ES8311 needs the I²S MCLK (GPIO2); forgetting it ⇒
-     garbled/no output.
-  3. **KORVO-derived demo config** — verify the codec is really ES8311 (0x18) by
-     I²C scan; don't assume the 4-mic ES7210 array config wholesale.
+- **Done-correctly:** audible tone (then WAV); log `audio: PCM5101 ready` +
+  `audio: playing`. The killer footgun:
+  1. **WRONG CODEC IN THE DEMO (the big one).** Waveshare's official ESP-IDF
+     demo configures **ES8311 + ES7210 over I²C** — but those chips **are not on
+     this board**. An I²C scan finds nothing at 0x18/0x40 (only touch 0x15,
+     expander 0x20, RTC 0x51). The board's real audio, per the **schematic**, is
+     a **PCM5101A I²S DAC** (→ NS8002 amp) for playback and an **ICS-43434 I²S
+     MEMS mic** for capture — **both pure I²S, no I²C control bus.** A model that
+     trusts the demo burns hours hunting a nonexistent codec (expander power?
+     MCLK? reset line?) — all dead ends. The fix is *less* code: a plain I²S TX
+     channel; no esp_codec_dev. Lesson: on the C variant, trust the schematic
+     over the demo's `bsp_board.c`.
+  2. **Continuous-tone underrun.** With I²S `auto_clear=false` (default), once a
+     finite tone's samples are consumed the DMA repeats the stale buffer → the
+     beep drones forever. Set `auto_clear=true` so underruns emit silence.
 - **Device-free slices:** build (T1); sine-buffer fill `audio_fill_sine()` host
-  test (T2); audio_init call-sequence — PA enabled, codec opened before write —
-  via the fakes harness (T3). Only "I hear it" needs the board (T5).
-- **STATUS (blocked, 2026-05-31):** scaffolding is in (`audio.c`: I2S TX +
-  esp_codec_dev ES8311 at 16k/16/mono; `audio_tone` host-tested). But the
-  **ES8311 does not ACK on I2C** on the bench board — a direct 7-bit probe of
-  0x18 gets nothing, while touch (0x15), the expander (0x20) and the RTC (0x51)
-  all answer. Docs confirm the board *has* ES8311+ES7210, so the chip is held in
-  reset / unpowered by a path not yet found. **Ruled out:** driving all TCA9554
-  expander pins high (the demo brings the codec up *before* its EXIO_Init, so
-  it's not expander-gated); MCLK-before-config (enabling I2S first per the
-  esp_codec_dev test board didn't help). **Next:** get the 1.85C schematic and
-  find the ES8311 RESET/power line (likely an MCU GPIO we're not driving).
-  `audio_play_init` currently probes 0x18 and bails with one warning so boot
-  stays clean.
+  test (T2). The playback path has no I²C/codec call-sequence to mock, so T3
+  adds little here; "I hear it" needs the board (T5).
+- **STATUS (done, 2026-05-31):** speaker plays a clean tone. `audio.c` is a
+  master I²S TX to the PCM5101A at 16k/16-bit/mono; `audio_tone` host-tested.
+  Remaining 1c: embed + play a WAV (1c-a step 2), then ICS-43434 mic capture →
+  serial → WAV file (1c-b).
 
 <!-- Append new ideas below as phases land. -->

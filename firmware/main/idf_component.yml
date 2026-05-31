@@ -8,7 +8,7 @@
 ##                            LCD reset hangs off expander pin 2, not a GPIO
 ##   esp_lvgl_port            LVGL 9 integration (decided UI framework, SPEC §8)
 ##   esp_lcd_touch_cst816s    capacitive touch over I2C
-##   esp_codec_dev            ES8311 (play) + ES7210 (capture) over I2S/I2C
+## Audio is pure I2S (PCM5101A DAC + ICS-43434 mic) — no codec component needed.
 dependencies:
   idf:
     version: '>=5.4.0'
@@ -16,4 +16,3 @@ dependencies:
   espressif/esp_io_expander_tca9554: ^2.0.3
   espressif/esp_lvgl_port: ^2.8.0
   espressif/esp_lcd_touch_cst816s: ^1.1.1
-  espressif/esp_codec_dev: ^1.5.10

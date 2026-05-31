@@ -124,10 +124,11 @@ mic ─▶ ring buffer ─▶ wake-word model ─▶ (on trigger) ─▶ stream 
 - STT and TTS run on the bridge (CPU/GPU is free there; keeps firmware lean).
 - Half-duplex for v1 (no barge-in while clawlexa is speaking). Full-duplex
   with echo cancellation is a stretch goal.
-- Device audio I/O is **16 kHz / 16-bit mono PCM** over I²S via the
-  `esp_codec_dev` component: **ES8311** drives the speaker (playback), **ES7210**
-  captures the mic. The speaker amp is gated by a GPIO (PA enable). See
-  [hardware/PINOUT.md](./hardware/PINOUT.md).
+- Device audio I/O is **16 kHz / 16-bit mono PCM** over I²S. The 1.85C has **no
+  I²C codec** (the Waveshare demo's ES8311/ES7210 config is KORVO-derived and
+  does not match this board): playback is a **PCM5101A** I²S DAC → NS8002 amp;
+  capture is an **ICS-43434** I²S MEMS mic on a separate I²S bus. No codec
+  component needed — plain I²S TX/RX. See [hardware/PINOUT.md](./hardware/PINOUT.md).
 
 **Open:**
 - STT engine: local `whisper.cpp` (offline, free, ~1s latency on M-series)

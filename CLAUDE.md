@@ -108,6 +108,8 @@ venv first per `firmware/tests/README.md`.
   - `"display: ST77916 ready"`, `"panel variant:"` (`main/display.c`) →
     `tests/pytest/test_display.py`
   - `"touch: CST816 ready"` (`main/touch.c`) → `tests/pytest/test_display.py`
+  - `"audio: PCM5101 ready"`, `"audio: playing"` (`main/audio.c`) →
+    `tests/pytest/test_audio.py`
 
 ## Hardware notes
 

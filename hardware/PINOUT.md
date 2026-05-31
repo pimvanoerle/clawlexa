@@ -42,31 +42,33 @@ Devices on the bus: CST816 touch (0x15), PCA9554 IO expander (0x20). The
 QMI8658 IMU, RTC, and audio codec also sit on this board's I²C — addresses TBD,
 documented when those phases land.
 
-## Audio — ES8311 (play) + ES7210 (capture), I²S + shared I²C
+## Audio — PCM5101A DAC (play) + ICS-43434 mic (capture), pure I²S
 
-Both codecs sit on the shared I²C bus (SCL 10 / SDA 11) and share one I²S bus.
+Verified against the official board **schematic**. There is **NO I²C audio
+codec** on this board — audio is two independent I²S devices, no control bus.
+
+**Speaker** — PCM5101A I²S DAC → NS8002 amplifier (DAC runs MCLK-less via its
+internal PLL off BCLK):
 
 | Signal | ESP32-S3 |
 |--------|----------|
-| I²S MCLK | GPIO2 |
-| I²S BCLK (SCLK) | GPIO48 |
+| I²S BCLK | GPIO48 |
 | I²S WS (LRCK) | GPIO38 |
-| I²S DOUT (→ ES8311 → speaker) | GPIO47 |
-| I²S DIN (← ES7210 mic ADC) | GPIO39 |
-| Speaker amp (PA) enable | GPIO15 |
+| I²S DOUT (→ PCM5101A DIN) | GPIO47 |
 
-| I²C device | Addr |
-|------------|------|
-| ES8311 playback codec | 0x18 |
-| ES7210 capture ADC | 0x40 |
+**Microphone** — ICS-43434 I²S MEMS mic, on its **own** I²S bus:
 
-> **Footgun (PA):** the speaker amplifier is gated by GPIO15 — the demo drives it
-> high around playback. No PA enable ⇒ silent speaker even with a working codec.
->
-> **Caveat (verify on hardware):** these come from Waveshare's official 1.85C
-> demo, whose audio-board config is **KORVO-2-derived** (a 4-mic ES7210 array).
-> The pins look right, but confirm the codecs by I²C-scanning for 0x18/0x40 at
-> bring-up before trusting them; a one-mic round board may differ.
+| Signal | ESP32-S3 |
+|--------|----------|
+| I²S SCK | GPIO15 |
+| I²S WS | GPIO2 |
+| I²S SD (← mic data) | GPIO39 |
+
+> **Footgun (the big one):** Waveshare's ESP-IDF *demo* configures **ES8311 +
+> ES7210 over I²C** (its audio-board component is KORVO-2 copy-paste). Those
+> chips **are not on this board** — an I²C scan finds nothing at 0x18/0x40, and
+> chasing the demo wastes hours looking for a codec that doesn't exist. Trust the
+> schematic: PCM5101A (no I²C) for playback, ICS-43434 (no I²C) for capture.
 
 ## Sources & caveats
 

@@ -39,14 +39,9 @@ void app_main(void) {
     ESP_ERROR_CHECK(display_init(&i2c_bus));
     ESP_ERROR_CHECK(touch_init(i2c_bus));
 
-    /* Phase 1c: audio playback — beep on boot to prove the speaker path.
-     * Non-fatal while bringing up: a codec/wiring issue shouldn't brick boot. */
-    esp_err_t aerr = audio_play_init(i2c_bus);
-    if (aerr == ESP_OK) {
-        audio_play_tone(1000, 500);
-    } else {
-        ESP_LOGW(TAG, "audio init failed (%s); continuing", esp_err_to_name(aerr));
-    }
+    /* Phase 1c: audio playback — beep on boot to prove the speaker path. */
+    ESP_ERROR_CHECK(audio_play_init());
+    ESP_ERROR_CHECK(audio_play_tone(1000, 500));
 #endif
 
     /* Phase 1a: heartbeat only. Audio bring-up lands in 1c. */

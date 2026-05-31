@@ -33,13 +33,12 @@
 #define BOARD_TOUCH_ADDR          0x15
 #define BOARD_TOUCH_INT_GPIO      4
 
-/* Audio: ES8311 (play) + ES7210 (capture) on the shared I2C bus, one I2S bus. */
-#define BOARD_I2S_MCLK_GPIO       2
-#define BOARD_I2S_BCLK_GPIO       48
-#define BOARD_I2S_WS_GPIO         38
-#define BOARD_I2S_DOUT_GPIO       47    /* -> ES8311 -> speaker */
-#define BOARD_I2S_DIN_GPIO        39    /* <- ES7210 mic ADC */
-#define BOARD_AUDIO_PA_GPIO       15    /* speaker amplifier enable (active high) */
-/* esp_codec_dev uses 8-bit I2C addresses; a 7-bit bus scan shows these >> 1. */
-#define BOARD_ES8311_ADDR         0x30  /* 7-bit scan: 0x18 */
-#define BOARD_ES7210_ADDR         0x80  /* 7-bit scan: 0x40 */
+/* Audio is pure I2S — NO I2C codec on this board (the demo's ES8311/ES7210
+ * config is KORVO-derived and does not apply). Speaker: PCM5101A I2S DAC into
+ * an NS8002 amp. Mic: ICS-43434 I2S MEMS mic on its own I2S bus. */
+#define BOARD_SPK_I2S_BCLK_GPIO   48
+#define BOARD_SPK_I2S_WS_GPIO     38
+#define BOARD_SPK_I2S_DOUT_GPIO   47    /* -> PCM5101A DIN -> speaker */
+#define BOARD_MIC_I2S_SCK_GPIO    15
+#define BOARD_MIC_I2S_WS_GPIO     2
+#define BOARD_MIC_I2S_SD_GPIO     39    /* <- ICS-43434 data out */
