@@ -6,6 +6,7 @@
 #include "esp_log.h"
 
 #include "audio_tone.h"
+#include "wav.h"
 #include "board.h"
 
 static const char *TAG = "audio";
@@ -62,5 +63,28 @@ esp_err_t audio_play_tone(uint32_t freq_hz, uint32_t duration_ms) {
             TAG, "i2s write failed");
         done += n;
     }
+    return ESP_OK;
+}
+
+esp_err_t audio_play_wav(const uint8_t *wav, size_t len) {
+    ESP_RETURN_ON_FALSE(s_tx, ESP_ERR_INVALID_STATE, TAG, "audio not initialized");
+
+    wav_info_t info;
+    ESP_RETURN_ON_FALSE(wav_parse(wav, len, &info), ESP_ERR_INVALID_ARG, TAG, "bad WAV");
+    ESP_RETURN_ON_FALSE(info.bits_per_sample == 16 && info.channels == 1,
+                        ESP_ERR_NOT_SUPPORTED, TAG, "need 16-bit mono WAV");
+    ESP_LOGI(TAG, "playing WAV: %luHz, %lu bytes",
+             (unsigned long)info.sample_rate, (unsigned long)info.data_bytes);
+
+    /* Retune the I2S clock to the WAV's sample rate (channel must be idle). */
+    ESP_RETURN_ON_ERROR(i2s_channel_disable(s_tx), TAG, "i2s disable failed");
+    i2s_std_clk_config_t clk = I2S_STD_CLK_DEFAULT_CONFIG(info.sample_rate);
+    ESP_RETURN_ON_ERROR(i2s_channel_reconfig_std_clock(s_tx, &clk), TAG, "i2s reclock failed");
+    ESP_RETURN_ON_ERROR(i2s_channel_enable(s_tx), TAG, "i2s enable failed");
+
+    size_t written = 0;
+    ESP_RETURN_ON_ERROR(
+        i2s_channel_write(s_tx, info.data, info.data_bytes, &written, portMAX_DELAY),
+        TAG, "i2s write failed");
     return ESP_OK;
 }

@@ -11,6 +11,10 @@
 
 static const char *TAG = "clawlexa";
 
+/* Boot sound embedded from main/assets/boot.wav (see EMBED_FILES in CMakeLists). */
+extern const uint8_t boot_wav_start[] asm("_binary_boot_wav_start");
+extern const uint8_t boot_wav_end[]   asm("_binary_boot_wav_end");
+
 /* Boot banner — pytest-embedded asserts on the literal "clawlexa booted"
  * substring, so don't change that phrase without updating tests/pytest. */
 static void log_boot_banner(void) {
@@ -39,9 +43,10 @@ void app_main(void) {
     ESP_ERROR_CHECK(display_init(&i2c_bus));
     ESP_ERROR_CHECK(touch_init(i2c_bus));
 
-    /* Phase 1c: audio playback — beep on boot to prove the speaker path. */
+    /* Phase 1c: audio playback — play the embedded boot chime (WAV from flash). */
     ESP_ERROR_CHECK(audio_play_init());
-    ESP_ERROR_CHECK(audio_play_tone(1000, 500));
+    ESP_ERROR_CHECK(audio_play_wav(boot_wav_start,
+                                   (size_t)(boot_wav_end - boot_wav_start)));
 #endif
 
     /* Phase 1a: heartbeat only. Audio bring-up lands in 1c. */

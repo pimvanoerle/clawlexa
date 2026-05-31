@@ -148,9 +148,10 @@ When a task is T5-only at face value, decompose it: list the device-free slices
 - **Device-free slices:** build (T1); sine-buffer fill `audio_fill_sine()` host
   test (T2). The playback path has no I²C/codec call-sequence to mock, so T3
   adds little here; "I hear it" needs the board (T5).
-- **STATUS (done, 2026-05-31):** speaker plays a clean tone. `audio.c` is a
-  master I²S TX to the PCM5101A at 16k/16-bit/mono; `audio_tone` host-tested.
-  Remaining 1c: embed + play a WAV (1c-a step 2), then ICS-43434 mic capture →
-  serial → WAV file (1c-b).
+- **STATUS (1c-a done, 2026-05-31):** speaker plays a tone AND an embedded WAV
+  from flash (rising chime). `audio.c` = master I²S TX to the PCM5101A; tone via
+  host-tested `audio_tone`, WAV via host-tested `wav.c` parser + `EMBED_FILES`
+  (`assets/boot.wav`), clock retuned to the WAV's rate. Remaining: **1c-b** —
+  ICS-43434 I²S mic capture (SCK=15, WS=2, SD=39) → dump over serial → host WAV.
 
 <!-- Append new ideas below as phases land. -->

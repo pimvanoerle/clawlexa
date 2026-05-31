@@ -83,6 +83,19 @@ target_link_libraries(test_audio_tone PRIVATE unity m)
 add_test(NAME test_audio_tone COMMAND test_audio_tone)
 # -----------------------------------------------------------------------
 
+# --- test_wav -----------------------------------------------------------
+# Pure WAV-header parser for the embedded boot sound, no IDF/IO deps.
+add_executable(test_wav
+    test_wav.c
+    "${FIRMWARE_MAIN}/wav.c"
+)
+target_include_directories(test_wav PRIVATE
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_wav PRIVATE unity)
+add_test(NAME test_wav COMMAND test_wav)
+# -----------------------------------------------------------------------
+
 # --- test_display_sequence (tier T3: mocked-IO interaction test) ---------
 # Compiles the real display.c against fake IDF/component headers (fakes/) and
 # asserts the bring-up call sequence + variant selection with no hardware.
