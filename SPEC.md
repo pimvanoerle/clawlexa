@@ -60,16 +60,18 @@ behind clean interfaces.
   protocol to the bridge.
 - Device is responsible for wake-word detection so we don't stream audio
   continuously across the LAN.
+- **Transport: WebSocket** (binary frames over TCP). Built-in framing,
+  NAT-friendly, easy to debug; `esp_websocket_client` on firmware, `websockets`
+  on the bridge. Control = JSON text frames; audio = raw binary frames.
+- **Wire audio codec: 16 kHz mono 16-bit PCM** for v1 (no device encoder,
+  matches the mic/speaker pipeline, ~256 kbps is fine on a LAN). Opus later.
+- **Discovery: hardcoded** bridge host:port + WiFi creds via Kconfig for v1
+  (movable to NVS). mDNS auto-discovery and BT/SoftAP provisioning come later.
+- **Auth: trust the LAN** for v1. A shared secret in NVS comes later.
 
 **Open:**
-- Device ↔ bridge transport: WebSocket (binary frames) vs raw TCP vs UDP+RTP
-  vs MQTT. Leaning WebSocket — easy to debug, framing built-in, works through
-  most network setups.
-- Audio codec on the wire: 16 kHz PCM (simple, ~256 kbps) vs Opus (40–64 kbps,
-  needs encoder on ESP32 — Espressif has an Opus port).
-- Pairing / discovery: hardcoded host IP in NVS vs mDNS auto-discovery vs
-  Bluetooth provisioning.
-- Auth between device and bridge: shared secret in NVS, or just trust LAN.
+- When to graduate provisioning from Kconfig → NVS → mDNS/BT, and add the
+  shared-secret handshake (all deferred past the v1 link bring-up).
 
 ## 5. MCP server surface
 
@@ -204,12 +206,15 @@ calendar reminder), tap-to-confirm flows, swipe to dismiss.
 
 ## 10. Bridge stack
 
+**Decided:**
+- **Python** for v1 — `mcp` SDK exists, `websockets` for the device link, easy
+  STT/TTS libs later, fast iteration. Lives in `bridge/`.
+- Ships as a **one-shot runnable script/module** for v1 (`python -m clawlexa_bridge`
+  or similar); a `pipx`-installable CLI can come later.
+
 **Open:**
-- Language: Python (fast iteration, `mcp` SDK exists, easy STT/TTS libs) vs
-  Rust/Go (lower footprint, no dep hell). Likely **Python** for v1 — the
-  laptop has the cycles, and we want to iterate fast.
-- Whether to ship as a one-shot script or as a `pipx`-installable CLI
-  (`clawlexa-bridge`).
+- Packaging polish (pipx/entry-point) and config file format — deferred until
+  the bridge does more than echo the link.
 
 ## 10a. Testing strategy
 
@@ -285,9 +290,9 @@ Nothing in here yet — created as each phase starts.
 
 A single list to make easy to triage; each links to its section above.
 
-- [ ] Device↔bridge transport (§4)
-- [ ] Audio codec on wire (§4)
-- [ ] Device discovery / pairing (§4)
+- [x] ~~Device↔bridge transport~~ → WebSocket (binary frames) (§4)
+- [x] ~~Audio codec on wire~~ → 16 kHz mono PCM for v1; Opus later (§4)
+- [x] ~~Device discovery / pairing~~ → hardcoded via Kconfig for v1; mDNS later (§4)
 - [ ] MCP push-notifications mechanism (§5)
 - [ ] STT engine default (§6)
 - [ ] TTS engine default (§6)
@@ -295,4 +300,4 @@ A single list to make easy to triage; each links to its section above.
 - [ ] Actual wake word phrase (§7)
 - [x] ~~On-device UI framework~~ → LVGL via `esp_lvgl_port` (§8)
 - [x] ~~Firmware framework~~ → ESP-IDF + `idf.py`, v5.4+ (§9)
-- [ ] Bridge language: Python vs Rust/Go (§10)
+- [x] ~~Bridge language~~ → Python, shipped as a one-shot script for v1 (§10)
