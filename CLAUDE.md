@@ -32,8 +32,8 @@ agent loop) happens on the host.
   should be obvious in the diff (e.g. the wire protocol changing) and called
   out in the commit message.
 - **Don't fabricate file paths, build commands, or test commands** in this
-  file until they actually work. The `firmware/` tree exists as of Phase 1a;
-  the `bridge/` tree does not yet — don't document it until it lands.
+  file until they actually work. Both the `firmware/` tree (Phase 1a) and the
+  `bridge/` tree (Phase 2b) now exist.
 
 ## Post-training task ideas (running log)
 
@@ -94,6 +94,15 @@ pytest tests/pytest
 
 The `tests/pytest/` suite uses `pytest-embedded` — install its deps into a
 venv first per `firmware/tests/README.md`.
+
+**Bridge** (Python, host-side — no board needed):
+
+```bash
+cd bridge
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # one-time
+.venv/bin/python -m clawlexa_bridge --host 0.0.0.0 --port 8765       # run server
+.venv/bin/python -m pytest                                          # bridge tests
+```
 
 ## Testing rules (Phase 1+)
 

@@ -1,0 +1,13 @@
+[project]
+name = "clawlexa-bridge"
+version = "0.1.0"
+description = "Host-side bridge between the clawlexa ESP32 device and an MCP agent."
+requires-python = ">=3.10"
+dependencies = ["websockets>=12,<14"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
