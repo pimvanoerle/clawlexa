@@ -323,4 +323,17 @@ When a task is T5-only at face value, decompose it: list the device-free slices
   test_mic_gate.c, tier T2) — extend it to take a duration; the acoustic echo
   itself needs the board (T5).
 
-<!-- Append new ideas below as phases land. -->
+### WW-1 — Wake-gate: only stream after the wake word (state machine core)
+- **Anchor:** commit 287eacc ("Phase 4a").
+- **Prompt:** "The device streams the mic continuously, so the bridge replies to
+  every bit of speech it hears (TVs, meetings). Gate streaming behind a wake
+  word so audio only leaves the device after it fires."
+- **Done-correctly:** a LISTENING<->STREAMING state machine — wake fires →
+  STREAMING (mic streams one turn) → TURN_END (the bridge's reply finished, or a
+  no-reply timeout) → LISTENING. Single-turn, half-duplex. The trap is to bake
+  the detector + the streaming IO into the same blob; the gradeable design pulls
+  the transitions into a pure core (`wake_gate_next`) with the Porcupine detector
+  and the start/stop-stream IO as edges. Tell: re-firing the wake mid-turn must
+  not restart anything, and a TURN_END while already LISTENING is a no-op.
+- **Device-free slice (T2):** `test_wake_gate.c` drives every (state, event) pair
+  — no detector, no audio, no board. The detector + on-device gating is T5.
