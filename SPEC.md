@@ -265,8 +265,9 @@ Nothing in here yet — created as each phase starts.
 - [x] **Phase 1** — Hardware bring-up: display "hello" (LVGL/ST77916) + touch
       (CST816); play a WAV from flash through the speaker (PCM5101A DAC); capture
       mic (ICS-43434) to a WAV over USB serial via `firmware/tools/capture_mic.py`.
-- [ ] **Phase 2** — WiFi bring-up + device↔bridge transport. Stream mic audio
-      to bridge, stream TTS bytes back.
+- [x] **Phase 2** — WiFi (station) + device↔bridge WebSocket transport. Mic
+      streams to the bridge (saved as WAV); bridge streams PCM back to the
+      speaker (verified via a mic→bridge→speaker echo loopback).
 - [ ] **Phase 3** — Bridge does STT and TTS round-trip (no agent yet — just a
       loop-back: "you said X").
 - [ ] **Phase 4** — Wake word on device. Audio only streams post-trigger.
