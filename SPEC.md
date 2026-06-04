@@ -131,14 +131,16 @@ mic ─▶ ring buffer ─▶ wake-word model ─▶ (on trigger) ─▶ stream 
   does not match this board): playback is a **PCM5101A** I²S DAC → NS8002 amp;
   capture is an **ICS-43434** I²S MEMS mic on a separate I²S bus. No codec
   component needed — plain I²S TX/RX. See [hardware/PINOUT.md](./hardware/PINOUT.md).
+- **STT: local `faster-whisper`** on the bridge (offline, no API keys, private;
+  fast on Apple Silicon). **TTS: local `Piper`** (offline, no keys). Both sit
+  behind a small interface so a cloud engine can drop in later; engine choice is
+  configurable. v1 is all-local.
+- **Endpointing: server-side VAD** on the bridge (energy-based for v1) — the
+  device streams; the bridge segments utterances on silence.
 
 **Open:**
-- STT engine: local `whisper.cpp` (offline, free, ~1s latency on M-series)
-  vs cloud (Deepgram, OpenAI Realtime, Groq Whisper). Likely *configurable*
-  with a sensible default.
-- TTS engine: cloud (ElevenLabs, OpenAI, Cartesia) vs local (Piper, Kokoro).
-  Same — configurable, default to whichever sounds best for the MVP demo.
-- Endpointing: server-side VAD vs let STT model decide.
+- Whether to add cloud STT/TTS options (better TTS voices) behind the interface,
+  and a config knob to pick the engine — deferred until the local path works.
 
 ## 7. Wake word
 
@@ -295,8 +297,9 @@ A single list to make easy to triage; each links to its section above.
 - [x] ~~Audio codec on wire~~ → 16 kHz mono PCM for v1; Opus later (§4)
 - [x] ~~Device discovery / pairing~~ → hardcoded via Kconfig for v1; mDNS later (§4)
 - [ ] MCP push-notifications mechanism (§5)
-- [ ] STT engine default (§6)
-- [ ] TTS engine default (§6)
+- [x] ~~STT engine default~~ → local `faster-whisper` (cloud later) (§6)
+- [x] ~~TTS engine default~~ → local `Piper` (cloud later) (§6)
+- [x] ~~Endpointing~~ → server-side VAD on the bridge (§6)
 - [ ] Wake-word engine: microWakeWord vs ESP-Skainet (§7)
 - [ ] Actual wake word phrase (§7)
 - [x] ~~On-device UI framework~~ → LVGL via `esp_lvgl_port` (§8)
