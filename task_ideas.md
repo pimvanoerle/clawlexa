@@ -289,4 +289,33 @@ When a task is T5-only at face value, decompose it: list the device-free slices
   reasoning step is gradeable from a transcript (does the model reason from the
   missing banners rather than demand a backtrace that can't exist?).
 
+### VAD-1 — Server-side endpointing of a continuous mic stream
+- **Anchor:** commit b568cf2 ("Phase 3c-a").
+- **Prompt:** "The device now streams the mic continuously. Have the bridge split
+  that stream into utterances on silence and transcribe each one."
+- **Done-correctly:** an energy/RMS `Endpointer` (pre-roll for word onsets,
+  silence hangover so short pauses don't split a phrase, a max-utterance cap)
+  emits utterance PCM blobs the server transcribes+answers; audio_end flushes the
+  in-progress one. Tell it works: full natural sentences segment as variable-length
+  utterances (not fixed clips); pure silence yields nothing.
+- **Device-free slice (T2/T3):** `test_vad.py` drives the Endpointer with
+  synthetic silence/tone arrays; `test_server.py` feeds voiced vs. silent PCM over
+  loopback and asserts WAV/STT/segmentation behavior — no model, no board.
+
+### HD-1 — Half-duplex echo: mute the mic for the reply's real duration
+- **Anchor:** after 9d10e62 (the bug is live there).
+- **Prompt:** "When the bridge speaks a reply, the device sometimes transcribes
+  its own output back (reply 'You said: Hello' returns as 'Did say hello'). Stop
+  the echo without cutting off the user."
+- **Done-correctly:** realize the mute releases too early — the device unmutes a
+  fixed tail after `play_end` is *received*, but play_end arrives when audio is
+  queued, not when the speaker finishes, so the clip's tail leaks into the mic.
+  Fix: the bridge knows the clip length (PCM bytes ÷ (rate·bytes/sample)); send it
+  in play_begin and mute for duration+tail (or otherwise gate on playback-complete).
+  Tell it's wrong: only SHORT replies echo (long ones finish before the tail
+  expires), and the echo text rhymes with the spoken reply.
+- **Device-free slice:** the gate decision is already pure (`mic_gate`,
+  test_mic_gate.c, tier T2) — extend it to take a duration; the acoustic echo
+  itself needs the board (T5).
+
 <!-- Append new ideas below as phases land. -->
