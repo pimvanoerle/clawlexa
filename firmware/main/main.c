@@ -41,7 +41,18 @@ void app_main(void) {
      * QEMU without the peripheral init aborting. */
     ESP_LOGI(TAG, "headless build: skipping display/touch bring-up");
 #else
-    /* Phase 1b: bring up the display, then touch on the shared I2C bus. */
+    /* Brownout mitigation: join WiFi FIRST, while the LCD backlight and audio
+     * amp are still off. WiFi's first-time RF calibration is the biggest current
+     * spike at boot; isolating it from the backlight + amp keeps the 3.3V rail
+     * from sagging into a brownout reset loop on a weak USB supply. WiFi is
+     * non-fatal — a bad AP shouldn't brick the local peripherals. */
+    bool wifi_ok = (wifi_connect() == ESP_OK);
+    if (!wifi_ok) {
+        ESP_LOGW(TAG, "WiFi not connected; continuing offline");
+    }
+
+    /* Phase 1b: bring up the display, then touch on the shared I2C bus. The
+     * backlight comes on at the end of display_init (after the WiFi spike). */
     i2c_master_bus_handle_t i2c_bus = NULL;
     ESP_ERROR_CHECK(display_init(&i2c_bus));
     ESP_ERROR_CHECK(touch_init(i2c_bus));
@@ -59,9 +70,8 @@ void app_main(void) {
     ESP_ERROR_CHECK(mic_capture_and_dump(3));
 #endif
 
-    /* Phase 2a/2b: join WiFi, then dial the bridge over WebSocket. Non-fatal —
-     * a bad AP or absent bridge shouldn't brick the local peripherals. */
-    if (wifi_connect() == ESP_OK) {
+    /* Phase 2a/2b: dial the bridge over WebSocket (requires WiFi above). */
+    if (wifi_ok) {
         if (ws_connect() == ESP_OK) {
 #if CONFIG_CLAWLEXA_STREAM_MIC_ON_CONNECT
             /* Continuously stream the mic; the task waits for the handshake and
@@ -71,8 +81,6 @@ void app_main(void) {
         } else {
             ESP_LOGW(TAG, "bridge link not started");
         }
-    } else {
-        ESP_LOGW(TAG, "WiFi not connected; continuing offline");
     }
 #endif
 
