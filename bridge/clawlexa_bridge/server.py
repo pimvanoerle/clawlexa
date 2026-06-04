@@ -15,11 +15,17 @@ import websockets
 from .audio import AudioRecorder
 from .protocol import parse_message, play_begin_message, play_end_message, welcome_message
 from .stt import STT, WhisperSTT
+from .tts import TTS, PiperTTS
 
 log = logging.getLogger("clawlexa.bridge")
 
 # Bytes of PCM per binary frame sent to the device (512 samples @ 16-bit).
 PLAY_CHUNK_BYTES = 1024
+
+
+def reply_text(transcript: str) -> str:
+    """The phrase the bridge speaks back for a given transcript (3b loopback)."""
+    return f"You said: {transcript}"
 
 
 async def send_wav(ws, path: str) -> None:
@@ -35,7 +41,8 @@ async def send_wav(ws, path: str) -> None:
 
 
 async def handle_connection(ws: websockets.WebSocketServerProtocol,
-                            stt: STT | None = None) -> None:
+                            stt: STT | None = None,
+                            tts: TTS | None = None) -> None:
     peer = ws.remote_address
     log.info("device connected from %s", peer)
     rec = AudioRecorder()
@@ -65,6 +72,10 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol,
                     # Transcription can be slow; don't block the event loop.
                     text = await asyncio.to_thread(stt.transcribe, path)
                     log.info('you said: "%s"', text)
+                    if text and tts is not None:
+                        # Synthesis is blocking too — keep it off the loop.
+                        wav = await asyncio.to_thread(tts.synthesize, reply_text(text))
+                        await send_wav(ws, wav)
             else:
                 log.info("recv %r", msg)
     except websockets.ConnectionClosed:
@@ -76,11 +87,15 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol,
         log.info("device disconnected from %s", peer)
 
 
-async def serve(host: str, port: int, stt: STT | None = None) -> None:
+async def serve(host: str, port: int, stt: STT | None = None,
+                tts: TTS | None = None) -> None:
     if stt is None:
         log.info("loading STT model (faster-whisper)...")
         stt = WhisperSTT()
-    handler = functools.partial(handle_connection, stt=stt)
+    if tts is None:
+        log.info("loading TTS voice (piper)...")
+        tts = PiperTTS()
+    handler = functools.partial(handle_connection, stt=stt, tts=tts)
     log.info("clawlexa-bridge listening on ws://%s:%d", host, port)
     async with websockets.serve(handler, host, port):
         await asyncio.Future()  # run until cancelled

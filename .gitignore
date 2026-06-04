@@ -38,3 +38,6 @@ wakeword/checkpoints/
 config.local.*
 secrets.*
 recordings/
+
+# Downloaded TTS voice models (fetched on first run; ~60 MB each)
+bridge/voices/
