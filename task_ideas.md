@@ -215,4 +215,46 @@ When a task is T5-only at face value, decompose it: list the device-free slices
 - **Device-free slices:** bridge `test_server.py` echo test (begin/binary/end
   round-trip over loopback) + `test_protocol.py` play-message builders (T-host).
 
+### STT-1 — Bridge transcribes received audio (faster-whisper)
+- **Anchor:** commit eb78e69 ("Phase 3a").
+- **Prompt:** "When the device finishes streaming a mic recording, have the bridge
+  transcribe it and log what was said."
+- **Done-correctly:** after `audio_end`, the bridge logs `you said: "<text>"`.
+  Pieces: a swappable `STT` interface (`stt.py`) with `WhisperSTT` (faster-whisper,
+  lazy heavy import so tests/imports don't pull it) + a `FakeSTT`; the server runs
+  STT off the event loop via `asyncio.to_thread` (whisper is blocking and slow —
+  calling it inline stalls the socket / other connections). Tell that it's wrong:
+  transcription inline blocks `async for message in ws` so a second device can't
+  handshake while one is transcribing.
+- **Device-free slice (T3-host):** `test_transcribes_on_audio_end` injects
+  `FakeSTT` via `functools.partial(handle_connection, stt=fake)` and asserts the
+  saved WAV was handed to STT exactly once — no model, no download, no board.
+
+### TI-1 — "Reset loop" that's really the debugger resetting the board
+- **Anchor:** any firmware with a boot banner; Phase 3a era.
+- **Prompt:** "The board looks stuck in a reset loop — it boots, prints the
+  banner, and reboots over and over whenever I watch the serial log. Find why."
+- **Done-correctly:** realize the *observer* is the cause — opening the port with
+  default pyserial (or many monitors) asserts DTR/RTS, which drives the ESP32
+  auto-reset circuit, so every capture reboots the chip. Fix: open with line
+  control disabled (`dtr=False, rts=False`, `dsrdtr=False`) to observe without
+  resetting. Tell: the boot timestamp restarts at ~0 ms every time you attach;
+  uptime never exceeds the time between captures.
+- **Device-free slice:** none (it's a host-tooling/electrical behavior), but it's
+  a strong *debugging-reasoning* eval — the bug is in how you look, not the code.
+
+### FW-1 — Touch driver floods the console on idle (CST816 standby NACK)
+- **Anchor:** Phase 1b touch bring-up onward (latent; surfaces when idle).
+- **Prompt:** "The console is flooded with `CST816S: I2C read failed` /
+  `i2c transaction failed` when nobody's touching the screen. Stop the spam
+  without breaking touch."
+- **Done-correctly:** the CST816 NACKs I2C reads while idle/in standby; `touch_task`
+  polling it logs an error every cycle (~20/s × 4 lines). Fix options: gate reads
+  on the touch INT line, treat a NACK as "no touch" silently, or rate-limit the
+  error log — touch must still report real presses. Tell: a healthy fix produces
+  *zero* error lines at idle yet still logs/handles a real touch.
+- **Device-free slice:** extract the "interpret a read result/NACK into a touch
+  event-or-nothing" decision into a pure function and host-test it (T-host); the
+  silence-at-idle behavior itself needs the board (T5).
+
 <!-- Append new ideas below as phases land. -->
