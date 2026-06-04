@@ -6,6 +6,7 @@ frames. Binary (audio) frames are logged as a placeholder until Phase 2c.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import wave
 
@@ -13,6 +14,7 @@ import websockets
 
 from .audio import AudioRecorder
 from .protocol import parse_message, play_begin_message, play_end_message, welcome_message
+from .stt import STT, WhisperSTT
 
 log = logging.getLogger("clawlexa.bridge")
 
@@ -32,7 +34,8 @@ async def send_wav(ws, path: str) -> None:
     log.info("sent %d bytes of PCM to device for playback", len(data))
 
 
-async def handle_connection(ws: websockets.WebSocketServerProtocol) -> None:
+async def handle_connection(ws: websockets.WebSocketServerProtocol,
+                            stt: STT | None = None) -> None:
     peer = ws.remote_address
     log.info("device connected from %s", peer)
     rec = AudioRecorder()
@@ -58,9 +61,10 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol) -> None:
             elif mtype == "audio_end":
                 path, nbytes = rec.end()
                 log.info("saved %s (%d bytes)", path, nbytes)
-                if path:  # echo it straight back so the device plays it
-                    log.info("echoing %s back to device", path)
-                    await send_wav(ws, path)
+                if path and stt is not None:
+                    # Transcription can be slow; don't block the event loop.
+                    text = await asyncio.to_thread(stt.transcribe, path)
+                    log.info('you said: "%s"', text)
             else:
                 log.info("recv %r", msg)
     except websockets.ConnectionClosed:
@@ -72,7 +76,11 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol) -> None:
         log.info("device disconnected from %s", peer)
 
 
-async def serve(host: str, port: int) -> None:
+async def serve(host: str, port: int, stt: STT | None = None) -> None:
+    if stt is None:
+        log.info("loading STT model (faster-whisper)...")
+        stt = WhisperSTT()
+    handler = functools.partial(handle_connection, stt=stt)
     log.info("clawlexa-bridge listening on ws://%s:%d", host, port)
-    async with websockets.serve(handle_connection, host, port):
+    async with websockets.serve(handler, host, port):
         await asyncio.Future()  # run until cancelled
