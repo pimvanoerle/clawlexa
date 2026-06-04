@@ -19,6 +19,17 @@ def welcome_message() -> str:
     )
 
 
+def play_begin_message(rate: int, channels: int, bits: int) -> str:
+    """Tell the device a run of binary PCM frames (to play) is starting."""
+    return json.dumps(
+        {"type": "play_begin", "rate": rate, "channels": channels, "bits": bits}
+    )
+
+
+def play_end_message() -> str:
+    return json.dumps({"type": "play_end"})
+
+
 def parse_message(raw: str) -> dict[str, Any]:
     """Parse a JSON control frame into a dict.
 

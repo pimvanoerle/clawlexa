@@ -66,6 +66,13 @@ esp_err_t audio_play_tone(uint32_t freq_hz, uint32_t duration_ms) {
     return ESP_OK;
 }
 
+esp_err_t audio_play_pcm(const int16_t *samples, size_t n_samples) {
+    ESP_RETURN_ON_FALSE(s_tx, ESP_ERR_INVALID_STATE, TAG, "audio not initialized");
+    size_t written = 0;
+    return i2s_channel_write(s_tx, samples, n_samples * sizeof(int16_t), &written,
+                             portMAX_DELAY);
+}
+
 esp_err_t audio_play_wav(const uint8_t *wav, size_t len) {
     ESP_RETURN_ON_FALSE(s_tx, ESP_ERR_INVALID_STATE, TAG, "audio not initialized");
 

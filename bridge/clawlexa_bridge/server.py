@@ -7,13 +7,29 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import wave
 
 import websockets
 
 from .audio import AudioRecorder
-from .protocol import parse_message, welcome_message
+from .protocol import parse_message, play_begin_message, play_end_message, welcome_message
 
 log = logging.getLogger("clawlexa.bridge")
+
+# Bytes of PCM per binary frame sent to the device (512 samples @ 16-bit).
+PLAY_CHUNK_BYTES = 1024
+
+
+async def send_wav(ws, path: str) -> None:
+    """Stream a WAV to the device to play: play_begin -> binary PCM -> play_end."""
+    with wave.open(path, "rb") as w:
+        rate, channels, bits = w.getframerate(), w.getnchannels(), w.getsampwidth() * 8
+        data = w.readframes(w.getnframes())
+    await ws.send(play_begin_message(rate, channels, bits))
+    for i in range(0, len(data), PLAY_CHUNK_BYTES):
+        await ws.send(data[i:i + PLAY_CHUNK_BYTES])
+    await ws.send(play_end_message())
+    log.info("sent %d bytes of PCM to device for playback", len(data))
 
 
 async def handle_connection(ws: websockets.WebSocketServerProtocol) -> None:
@@ -42,6 +58,9 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol) -> None:
             elif mtype == "audio_end":
                 path, nbytes = rec.end()
                 log.info("saved %s (%d bytes)", path, nbytes)
+                if path:  # echo it straight back so the device plays it
+                    log.info("echoing %s back to device", path)
+                    await send_wav(ws, path)
             else:
                 log.info("recv %r", msg)
     except websockets.ConnectionClosed:

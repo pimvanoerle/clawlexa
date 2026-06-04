@@ -11,11 +11,14 @@
 #include "esp_websocket_client.h"
 
 #include "app_version.h"
+#include "audio.h"
 #include "mic.h"
 
 static const char *TAG = "ws";
 
-#define WS_TEXT_OPCODE 0x01
+#define WS_TEXT_OPCODE   0x01
+#define WS_BIN_OPCODE    0x02
+#define WS_CONT_OPCODE   0x00
 #define MIC_STREAM_RATE 16000
 #define MIC_FRAME_SAMPLES 256   /* 16 ms per binary frame @ 16 kHz */
 
@@ -39,9 +42,13 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data
         break;
     }
     case WEBSOCKET_EVENT_DATA:
-        /* Control frames are text; log them (e.g. the bridge's welcome). */
+        /* Text = control (e.g. the bridge's welcome); binary = PCM audio to play.
+         * Continuation frames (0x00) carry the rest of a fragmented binary msg. */
         if (e->op_code == WS_TEXT_OPCODE && e->data_len > 0) {
             ESP_LOGI(TAG, "<- %.*s", e->data_len, (const char *)e->data_ptr);
+        } else if ((e->op_code == WS_BIN_OPCODE || e->op_code == WS_CONT_OPCODE) &&
+                   e->data_len >= 2) {
+            audio_play_pcm((const int16_t *)e->data_ptr, e->data_len / 2);
         }
         break;
     case WEBSOCKET_EVENT_DISCONNECTED:
