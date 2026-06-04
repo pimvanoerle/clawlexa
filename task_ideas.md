@@ -201,4 +201,18 @@ When a task is T5-only at face value, decompose it: list the device-free slices
 - **Device-free slice:** none for the timing itself (it's live I2S), but the
   2×-sample symptom is obvious from the bridge WAV duration vs stream wall-time.
 
+### NET-3 — Bidirectional audio over the link (echo loopback)
+- **Anchor:** the "Phase 2c-b" commit.
+- **Prompt:** "Make the device play audio the bridge sends it, and have the bridge
+  echo a received mic recording back so it comes out the speaker."
+- **Done-correctly:** speak -> device streams mic -> bridge echoes -> device plays
+  it. Pieces: device handles incoming WS **binary** frames (op 0x02 + 0x00
+  continuation) -> `audio_play_pcm` to the DAC; bridge `send_wav` frames a WAV as
+  `play_begin` -> binary PCM -> `play_end`. Footgun: playing in the WS event
+  handler blocks the socket task during playback (fine for a short clip; a real
+  build wants a ring buffer + playback task). The wire stays 16 kHz mono PCM, so
+  no rate negotiation.
+- **Device-free slices:** bridge `test_server.py` echo test (begin/binary/end
+  round-trip over loopback) + `test_protocol.py` play-message builders (T-host).
+
 <!-- Append new ideas below as phases land. -->
