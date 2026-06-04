@@ -155,15 +155,24 @@ Candidates:
 | **microWakeWord** | Open source, train your own via Colab, used by ESPHome | Slightly higher latency, fewer pre-built models |
 | **Porcupine**     | Excellent accuracy, easy training UI                 | Commercial license required beyond personal use |
 
-**Leaning:** start with **microWakeWord** — open, trainable in a notebook,
-already runs on ESP32-S3 in the wild (ESPHome voice assistant satellites use
-it). Fall back to ESP-Skainet if accuracy isn't good enough.
-
-**Open:**
-- The actual wake word. Working name: "Hey Claw" or just "Claw". Needs to be
-  >= 3 syllables for reliable detection; "Claw" alone is borderline.
-- Whether to ship multiple wake words (one per agent — "Hey Pinch", "Hey
-  Spark") or stay with one neutral word.
+**Decided (Phase 4):**
+- **Engine: Porcupine (Picovoice).** Best accuracy and a custom keyword is
+  generated instantly in their web console (vs. ESP-Skainet's ~weeks portal
+  turnaround for a custom word). Needs a Picovoice **AccessKey** at runtime and a
+  per-platform `.ppn` keyword file (generate it for the ESP32 platform). Free for
+  personal/eval use; a commercial license is required for distribution — revisit
+  before shipping hardware. microWakeWord stays the open-source fallback if the
+  license becomes a blocker.
+- **Wake word: `clawlexa`** for the generic build (3 syllables, on-brand,
+  detection-friendly). The keyword is a **swappable per-deployment asset** — the
+  `.ppn` file + a config knob — so a specific agent build can flip it (e.g.
+  iPinch → `hey pinchy`) with no code change. This resolves the old "one word per
+  agent" question: one word per build, configurable, not hardcoded.
+- **Gating architecture.** The wake detector flips a small device-side state
+  machine LISTENING→STREAMING; the mic only streams a turn after the word fires,
+  and returns to LISTENING when the turn ends (the bridge's reply completes, or a
+  timeout). The transition logic is a pure, host-tested core (`wake_gate`); the
+  detector and the IO (start/stop streaming) are the swappable edges.
 
 ## 8. Display & touch
 

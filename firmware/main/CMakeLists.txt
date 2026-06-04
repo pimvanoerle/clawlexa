@@ -12,6 +12,7 @@ idf_component_register(
         "mic.c"
         "mic_sample.c"
         "mic_gate.c"
+        "wake_gate.c"
         "wifi.c"
         "ws.c"
     INCLUDE_DIRS

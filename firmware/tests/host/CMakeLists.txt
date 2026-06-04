@@ -122,6 +122,19 @@ target_link_libraries(test_mic_gate PRIVATE unity)
 add_test(NAME test_mic_gate COMMAND test_mic_gate)
 # -----------------------------------------------------------------------
 
+# --- test_wake_gate -----------------------------------------------------
+# Pure wake-gate state machine (Phase 4), no IDF/IO deps.
+add_executable(test_wake_gate
+    test_wake_gate.c
+    "${FIRMWARE_MAIN}/wake_gate.c"
+)
+target_include_directories(test_wake_gate PRIVATE
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_wake_gate PRIVATE unity)
+add_test(NAME test_wake_gate COMMAND test_wake_gate)
+# -----------------------------------------------------------------------
+
 # --- test_display_sequence (tier T3: mocked-IO interaction test) ---------
 # Compiles the real display.c against fake IDF/component headers (fakes/) and
 # asserts the bring-up call sequence + variant selection with no hardware.
