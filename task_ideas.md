@@ -243,19 +243,21 @@ When a task is T5-only at face value, decompose it: list the device-free slices
 - **Device-free slice:** none (it's a host-tooling/electrical behavior), but it's
   a strong *debugging-reasoning* eval — the bug is in how you look, not the code.
 
-### FW-1 — Touch driver floods the console on idle (CST816 standby NACK)
-- **Anchor:** Phase 1b touch bring-up onward (latent; surfaces when idle).
+### FW-1 — Touch driver floods the console on idle (CST816 standby NACK) [DONE 4c201dc]
+- **Anchor:** the bug is latent Phase 1b → fixed in commit 4c201dc.
 - **Prompt:** "The console is flooded with `CST816S: I2C read failed` /
   `i2c transaction failed` when nobody's touching the screen. Stop the spam
   without breaking touch."
 - **Done-correctly:** the CST816 NACKs I2C reads while idle/in standby; `touch_task`
-  polling it logs an error every cycle (~20/s × 4 lines). Fix options: gate reads
-  on the touch INT line, treat a NACK as "no touch" silently, or rate-limit the
-  error log — touch must still report real presses. Tell: a healthy fix produces
-  *zero* error lines at idle yet still logs/handles a real touch.
-- **Device-free slice:** extract the "interpret a read result/NACK into a touch
-  event-or-nothing" decision into a pure function and host-test it (T-host); the
-  silence-at-idle behavior itself needs the board (T5).
+  polling it logs an error every cycle (~20/s × 4 lines). The fix that landed: gate
+  the I2C read on the **INT pin** (BOARD_TOUCH_INT_GPIO, active-low) so the chip is
+  only read when a touch is signaled — zero idle reads, zero idle errors, real
+  presses still register. Other valid fixes: treat a NACK as "no touch" silently,
+  or rate-limit the error log. Tell: *zero* error lines at idle yet a real touch
+  still logs.
+- **Device-free slice:** the INT polarity decision is pulled into a pure helper
+  (`touch_int_active`, host-tested in test_touch_geom) — T-host; the silence-at-idle
+  behavior + that taps still register needs the board (T5).
 
 ### TTS-2 — Bridge speaks a reply back (Piper talk-back)
 - **Anchor:** commit 27c25b2 ("Phase 3b").
