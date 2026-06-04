@@ -168,10 +168,9 @@ static esp_err_t clear_panel_black(esp_lcd_panel_handle_t panel) {
     return err;
 }
 
-/* Drive the backlight with LEDC PWM at a reduced duty rather than a full-on
- * GPIO. The backlight is the dominant continuous load at boot; running it at
- * ~60% cuts that draw enough to keep a weak USB supply out of brownout while
- * staying plenty bright (LED brightness is sub-linear in current anyway). */
+/* Drive the backlight with LEDC PWM rather than a full-on GPIO, so brightness
+ * is adjustable and it draws less power. ~60% is plenty bright (LED brightness
+ * is sub-linear in current). */
 #define BL_DUTY_PERCENT 60
 #define BL_DUTY_RES     LEDC_TIMER_8_BIT  /* 0..255 */
 

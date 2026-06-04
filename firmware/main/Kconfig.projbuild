@@ -24,10 +24,9 @@ config CLAWLEXA_BOOT_CHIME
     bool "Play the boot chime through the speaker on boot"
     default n
     help
-        Play the embedded boot.wav through the speaker at startup. Off by default:
-        the amp current spike, on top of the LCD backlight and WiFi bring-up, can
-        brown out a weak USB supply into a boot-reset loop. audio_play_init() runs
-        regardless, so the speaker still works for bridge replies.
+        Play the embedded boot.wav through the speaker at startup. Off by default
+        to keep boot quiet. audio_play_init() runs regardless, so the speaker
+        still works for bridge replies.
 
 config CLAWLEXA_WIFI_SSID
     string "WiFi SSID"

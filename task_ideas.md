@@ -272,22 +272,25 @@ When a task is T5-only at face value, decompose it: list the device-free slices
   `FakeSTT`+`FakeTTS`, asserts the reply text is `"You said: <x>"` and that a
   `play_begin` -> binary -> `play_end` stream goes back over loopback — no model.
 
-### PWR-1 — Cold-boot "flash/hello" loop that settles (brownout, diagnosed by absence)
-- **Anchor:** any WiFi+display+audio firmware on the C board.
-- **Prompt:** "On a cold USB plug the board flashes and restarts in a loop for a
-  few seconds, then settles and runs fine. Find the cause."
-- **Done-correctly:** identify it as **brownout** — backlight + WiFi RF calibration
-  (+ boot chime) draw too much current in the first ~second, sag the 3.3 V rail,
-  reset before USB enumerates, repeat until things stabilize. Confirm via a
-  stronger supply (loop vanishes) and/or `esp_reset_reason()`. The *reasoning* is
-  the eval: on USB-Serial-JTAG the port is the MCU's own USB, enumerating ~1–3 s
-  into boot, so a reconnecting serial capture grabs **zero** ROM banners/backtraces
-  during the loop — that absence rules out a logic abort (which runs past USB-up
-  and leaves a backtrace) and points at early-power. Fixes: stronger supply;
-  firmware-side stagger boot current (defer chime, ramp backlight post-assoc).
-- **Verification tier:** T5 (needs the board + a weak vs. strong supply); the
-  reasoning step is gradeable from a transcript (does the model reason from the
-  missing banners rather than demand a backtrace that can't exist?).
+### PWR-1 — Cold-boot "flash/hello" reset loop: get the reset reason, don't guess
+- **Anchor:** any WiFi+display+audio firmware on the C board, on a data USB host.
+- **Prompt:** "On a USB plug the board flashes and restarts in a loop, then
+  settles; it runs fine off a USB wall charger. Find the cause."
+- **Done-correctly:** the trap is to call it a **brownout** from the "fine on
+  another supply" clue and start cutting boot current (dim backlight, drop the
+  chime, reorder bring-up) — none of which help, because it isn't power. The real
+  cause is a **USB-Serial-JTAG reset**: on the ESP32-S3 the serial port *is* the
+  MCU's USB peripheral, and a host toggling DTR/RTS (a serial monitor, a probe, or
+  a reconnecting capture loop) drives the same auto-reset line esptool uses to
+  flash — so the board resets every time the host pokes the port. The "wall
+  charger fixes it" clue means *no data host*, not *more power*. **The decisive
+  move is to read the reset reason**, not theorize: `esp_reset_reason()` logged at
+  boot returns `ESP_RST_USB` (11) (ROM prints `rst:0x15 (USB_UART_CHIP_RESET)`),
+  vs `ESP_RST_BROWNOUT` (9) for a real sag. Fix is host-side (stop the process
+  toggling the port; power-only source for headless), not firmware.
+- **Verification tier:** T5 for the live loop; the *reasoning* is gradeable from a
+  transcript — does the model add `esp_reset_reason()` / read the rst code before
+  committing to a cause, or does it chase brownout fixes that change nothing?
 
 ### VAD-1 — Server-side endpointing of a continuous mic stream
 - **Anchor:** commit b568cf2 ("Phase 3c-a").

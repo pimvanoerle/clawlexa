@@ -35,8 +35,10 @@ static void log_boot_banner(void) {
 
 void app_main(void) {
     log_boot_banner();
-    /* esp_reset_reason() == ESP_RST_BROWNOUT (9) confirms a brownout reset; on a
-     * clean cold start it's ESP_RST_POWERON (1). Logged every boot for diagnosis. */
+    /* Boot diagnostics. ESP_RST_USB (11) = reset via the USB-Serial-JTAG (a host
+     * toggling DTR/RTS — this, not a brownout, was the cause of the cold-boot
+     * "flash/hello" reset loop on a data USB host). ESP_RST_BROWNOUT (9) = power
+     * sag; ESP_RST_POWERON (1) = clean cold start. */
     ESP_LOGI(TAG, "reset reason: %d", (int)esp_reset_reason());
 
 #if CONFIG_CLAWLEXA_HEADLESS
@@ -45,11 +47,11 @@ void app_main(void) {
      * QEMU without the peripheral init aborting. */
     ESP_LOGI(TAG, "headless build: skipping display/touch bring-up");
 #else
-    /* Brownout mitigation: join WiFi FIRST, while the LCD backlight and audio
-     * amp are still off. WiFi's first-time RF calibration is the biggest current
-     * spike at boot; isolating it from the backlight + amp keeps the 3.3V rail
-     * from sagging into a brownout reset loop on a weak USB supply. WiFi is
-     * non-fatal — a bad AP shouldn't brick the local peripherals. */
+    /* Join WiFi first so the bridge link comes up as early as possible; the
+     * display/audio/mic bring-up follows. (This ordering was originally a
+     * brownout guess — that turned out wrong, see reset reason above — but it's
+     * a fine order to keep.) WiFi is non-fatal: a bad AP shouldn't brick the
+     * local peripherals. */
     bool wifi_ok = (wifi_connect() == ESP_OK);
     if (!wifi_ok) {
         ESP_LOGW(TAG, "WiFi not connected; continuing offline");
@@ -62,8 +64,8 @@ void app_main(void) {
     ESP_ERROR_CHECK(touch_init(i2c_bus));
 
     /* Phase 1c: audio playback. audio_play_init() always runs (needed for TTS
-     * replies); the boot chime is opt-in — its amp current spike, on top of the
-     * backlight + WiFi bring-up, can brown out a weak USB supply. */
+     * replies); the boot chime is opt-in (CONFIG_CLAWLEXA_BOOT_CHIME) to keep
+     * boot quiet by default. */
     ESP_ERROR_CHECK(audio_play_init());
 #if CONFIG_CLAWLEXA_BOOT_CHIME
     ESP_ERROR_CHECK(audio_play_wav(boot_wav_start,
