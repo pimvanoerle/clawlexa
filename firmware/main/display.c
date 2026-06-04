@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
@@ -167,13 +168,31 @@ static esp_err_t clear_panel_black(esp_lcd_panel_handle_t panel) {
     return err;
 }
 
+/* Drive the backlight with LEDC PWM at a reduced duty rather than a full-on
+ * GPIO. The backlight is the dominant continuous load at boot; running it at
+ * ~60% cuts that draw enough to keep a weak USB supply out of brownout while
+ * staying plenty bright (LED brightness is sub-linear in current anyway). */
+#define BL_DUTY_PERCENT 60
+#define BL_DUTY_RES     LEDC_TIMER_8_BIT  /* 0..255 */
+
 static void backlight_on(void) {
-    const gpio_config_t bl = {
-        .pin_bit_mask = 1ULL << BOARD_LCD_BL_GPIO,
-        .mode = GPIO_MODE_OUTPUT,
+    const ledc_timer_config_t timer = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .timer_num = LEDC_TIMER_0,
+        .duty_resolution = BL_DUTY_RES,
+        .freq_hz = 5000,
+        .clk_cfg = LEDC_AUTO_CLK,
     };
-    ESP_ERROR_CHECK(gpio_config(&bl));
-    gpio_set_level(BOARD_LCD_BL_GPIO, 1);
+    ESP_ERROR_CHECK(ledc_timer_config(&timer));
+    const ledc_channel_config_t channel = {
+        .gpio_num = BOARD_LCD_BL_GPIO,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = LEDC_CHANNEL_0,
+        .timer_sel = LEDC_TIMER_0,
+        .duty = (255 * BL_DUTY_PERCENT) / 100,
+        .hpoint = 0,
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&channel));
 }
 
 /* Hand the panel to LVGL and draw a centered "hello". */

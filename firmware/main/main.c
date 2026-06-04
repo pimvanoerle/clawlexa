@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "esp_chip_info.h"
 #include "esp_psram.h"
+#include "esp_system.h"
 
 #include "app_version.h"
 #include "display.h"
@@ -34,6 +35,9 @@ static void log_boot_banner(void) {
 
 void app_main(void) {
     log_boot_banner();
+    /* esp_reset_reason() == ESP_RST_BROWNOUT (9) confirms a brownout reset; on a
+     * clean cold start it's ESP_RST_POWERON (1). Logged every boot for diagnosis. */
+    ESP_LOGI(TAG, "reset reason: %d", (int)esp_reset_reason());
 
 #if CONFIG_CLAWLEXA_HEADLESS
     /* Emulation / host-CI build: no LCD or touch hardware present. Skip their
@@ -57,10 +61,14 @@ void app_main(void) {
     ESP_ERROR_CHECK(display_init(&i2c_bus));
     ESP_ERROR_CHECK(touch_init(i2c_bus));
 
-    /* Phase 1c: audio playback — play the embedded boot chime (WAV from flash). */
+    /* Phase 1c: audio playback. audio_play_init() always runs (needed for TTS
+     * replies); the boot chime is opt-in — its amp current spike, on top of the
+     * backlight + WiFi bring-up, can brown out a weak USB supply. */
     ESP_ERROR_CHECK(audio_play_init());
+#if CONFIG_CLAWLEXA_BOOT_CHIME
     ESP_ERROR_CHECK(audio_play_wav(boot_wav_start,
                                    (size_t)(boot_wav_end - boot_wav_start)));
+#endif
 
     /* Phase 1c-b: mic. Always bring it up; only auto-dump a recording over
      * serial (for tools/capture_mic.py) when explicitly built for it, since the
