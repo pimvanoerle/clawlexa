@@ -270,13 +270,14 @@ Nothing in here yet — created as each phase starts.
 - [x] **Phase 2** — WiFi (station) + device↔bridge WebSocket transport. Mic
       streams to the bridge (saved as WAV); bridge streams PCM back to the
       speaker (verified via a mic→bridge→speaker echo loopback).
-- [ ] **Phase 3** — Bridge does STT and TTS round-trip (no agent yet — just a
-      loop-back: "you said X"). **3a (STT) + 3b (TTS talk-back) done** — verified
-      live on hardware (speak → device streams → bridge transcribes with
-      faster-whisper → synthesizes "You said: X" with Piper → device speaks it
-      back). Remaining **3c**: continuous device streaming + server-side VAD
-      endpointing + half-duplex mute during playback (replaces the racy
-      once-per-boot 3 s mic trigger used for 3a/3b bring-up).
+- [x] **Phase 3** — Bridge does STT and TTS round-trip (no agent yet — just a
+      loop-back: "you said X"). **3a (STT)** faster-whisper; **3b (TTS talk-back)**
+      Piper, both verified live (speak → device → STT → "You said: X" → device
+      speaks it). **3c**: device streams the mic continuously (a FreeRTOS task,
+      no boot-time timing race); the bridge endpoints utterances with energy VAD
+      (`vad.py`); half-duplex — the device mutes its mic across the bridge's
+      playback (`mic_gate`, host-tested). 3a/3b's racy once-per-boot trigger is
+      retired.
 - [ ] **Phase 4** — Wake word on device. Audio only streams post-trigger.
 - [ ] **Phase 5** — MCP server wrapper around the bridge. Wire to iPinch.
 - [ ] **Phase 6** — Display states + basic touch (push-to-talk, mute,

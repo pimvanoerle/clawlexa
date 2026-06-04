@@ -64,13 +64,9 @@ void app_main(void) {
     if (wifi_connect() == ESP_OK) {
         if (ws_connect() == ESP_OK) {
 #if CONFIG_CLAWLEXA_STREAM_MIC_ON_CONNECT
-            /* Wait briefly for the handshake, then stream a mic clip to the bridge. */
-            for (int i = 0; i < 50 && !ws_is_connected(); i++) {
-                vTaskDelay(pdMS_TO_TICKS(100));
-            }
-            if (ws_is_connected()) {
-                ws_stream_mic(3);
-            }
+            /* Continuously stream the mic; the task waits for the handshake and
+             * re-opens the session on reconnect (no boot-time timing race). */
+            ws_stream_mic_start();
 #endif
         } else {
             ESP_LOGW(TAG, "bridge link not started");

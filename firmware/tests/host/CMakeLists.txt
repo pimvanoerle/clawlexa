@@ -109,6 +109,19 @@ target_link_libraries(test_mic_sample PRIVATE unity)
 add_test(NAME test_mic_sample COMMAND test_mic_sample)
 # -----------------------------------------------------------------------
 
+# --- test_mic_gate ------------------------------------------------------
+# Pure half-duplex mic-gating decision (3c), no IDF/IO deps.
+add_executable(test_mic_gate
+    test_mic_gate.c
+    "${FIRMWARE_MAIN}/mic_gate.c"
+)
+target_include_directories(test_mic_gate PRIVATE
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_mic_gate PRIVATE unity)
+add_test(NAME test_mic_gate COMMAND test_mic_gate)
+# -----------------------------------------------------------------------
+
 # --- test_display_sequence (tier T3: mocked-IO interaction test) ---------
 # Compiles the real display.c against fake IDF/component headers (fakes/) and
 # asserts the bring-up call sequence + variant selection with no hardware.

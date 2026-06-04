@@ -11,6 +11,7 @@ idf_component_register(
         "wav.c"
         "mic.c"
         "mic_sample.c"
+        "mic_gate.c"
         "wifi.c"
         "ws.c"
     INCLUDE_DIRS

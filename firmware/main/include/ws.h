@@ -14,6 +14,9 @@ esp_err_t ws_connect(void);
 /* True once the WebSocket handshake with the bridge has completed. */
 bool ws_is_connected(void);
 
-/* Stream `seconds` of mic audio to the bridge as an audio_begin -> binary PCM
- * frames -> audio_end session (blocking). Requires ws_connect + mic_init. */
-esp_err_t ws_stream_mic(uint32_t seconds);
+/* Start a background task that continuously streams mic audio to the bridge:
+ * sends audio_begin on each (re)connection, then 16-bit PCM frames. The bridge
+ * endpoints utterances itself (server-side VAD). Half-duplex — while the bridge
+ * is playing a reply (play_begin..play_end, plus a short tail) the mic is muted
+ * so we don't capture our own speaker output. Requires ws_connect + mic_init. */
+void ws_stream_mic_start(void);
