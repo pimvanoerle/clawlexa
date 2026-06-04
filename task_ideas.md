@@ -257,4 +257,36 @@ When a task is T5-only at face value, decompose it: list the device-free slices
   event-or-nothing" decision into a pure function and host-test it (T-host); the
   silence-at-idle behavior itself needs the board (T5).
 
+### TTS-2 — Bridge speaks a reply back (Piper talk-back)
+- **Anchor:** commit 27c25b2 ("Phase 3b").
+- **Prompt:** "After the bridge transcribes the mic recording, have it speak a
+  reply back out the device's speaker."
+- **Done-correctly:** speak -> device plays back "You said: <transcript>". Pieces:
+  a swappable `TTS` interface (`tts.py`) with `PiperTTS` (lazy import) + `FakeTTS`,
+  synthesis run off the event loop (`asyncio.to_thread`), reusing `send_wav()`.
+  **Footgun:** the default Piper voice MUST be a **16 kHz** ("low") voice — the
+  device's binary-PCM playback plays at a fixed 16 kHz clock and ignores
+  `play_begin`'s rate, so a 22 kHz "medium" voice plays ~38% fast and high-pitched.
+  Tell it's wrong: the reply is intelligible but chipmunk-fast.
+- **Device-free slice (T3-host):** `test_speaks_reply_on_audio_end` injects
+  `FakeSTT`+`FakeTTS`, asserts the reply text is `"You said: <x>"` and that a
+  `play_begin` -> binary -> `play_end` stream goes back over loopback — no model.
+
+### PWR-1 — Cold-boot "flash/hello" loop that settles (brownout, diagnosed by absence)
+- **Anchor:** any WiFi+display+audio firmware on the C board.
+- **Prompt:** "On a cold USB plug the board flashes and restarts in a loop for a
+  few seconds, then settles and runs fine. Find the cause."
+- **Done-correctly:** identify it as **brownout** — backlight + WiFi RF calibration
+  (+ boot chime) draw too much current in the first ~second, sag the 3.3 V rail,
+  reset before USB enumerates, repeat until things stabilize. Confirm via a
+  stronger supply (loop vanishes) and/or `esp_reset_reason()`. The *reasoning* is
+  the eval: on USB-Serial-JTAG the port is the MCU's own USB, enumerating ~1–3 s
+  into boot, so a reconnecting serial capture grabs **zero** ROM banners/backtraces
+  during the loop — that absence rules out a logic abort (which runs past USB-up
+  and leaves a backtrace) and points at early-power. Fixes: stronger supply;
+  firmware-side stagger boot current (defer chime, ramp backlight post-assoc).
+- **Verification tier:** T5 (needs the board + a weak vs. strong supply); the
+  reasoning step is gradeable from a transcript (does the model reason from the
+  missing banners rather than demand a backtrace that can't exist?).
+
 <!-- Append new ideas below as phases land. -->
