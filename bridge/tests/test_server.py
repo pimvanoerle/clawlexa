@@ -176,3 +176,25 @@ def test_speaks_reply_per_utterance(tmp_path, monkeypatch):
     types = [json.loads(f)["type"] for f in frames if isinstance(f, str)]
     assert types[0] == "play_begin" and types[-1] == "play_end"
     assert any(isinstance(f, (bytes, bytearray)) for f in frames)  # PCM was sent
+
+
+def test_empty_transcript_is_skipped(tmp_path, monkeypatch):
+    """An utterance that transcribes to nothing (silence/echo) gets no reply."""
+    monkeypatch.chdir(tmp_path)
+    fake_stt = FakeSTT("   ")  # whitespace only -> treated as no speech
+    fake_tts = FakeTTS()
+
+    async def run():
+        handler = functools.partial(server.handle_connection, stt=fake_stt,
+                                    tts=fake_tts, endpointer_factory=fast_ep)
+        async with websockets.serve(handler, "127.0.0.1", 0) as srv:
+            port = srv.sockets[0].getsockname()[1]
+            async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"type": "audio_begin", "rate": 16000,
+                                          "channels": 1, "bits": 16}))
+                await ws.send(voiced(4))
+                await ws.send(json.dumps({"type": "audio_end"}))
+                await asyncio.sleep(0.3)
+
+    asyncio.run(run())
+    assert fake_tts.calls == []  # no reply synthesized for empty speech

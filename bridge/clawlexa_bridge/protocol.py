@@ -19,11 +19,19 @@ def welcome_message() -> str:
     )
 
 
-def play_begin_message(rate: int, channels: int, bits: int) -> str:
-    """Tell the device a run of binary PCM frames (to play) is starting."""
-    return json.dumps(
-        {"type": "play_begin", "rate": rate, "channels": channels, "bits": bits}
-    )
+def play_begin_message(rate: int, channels: int, bits: int,
+                       ms: int | None = None) -> str:
+    """Tell the device a run of binary PCM frames (to play) is starting.
+
+    `ms` is the clip's playback duration. The device uses it to mute its mic for
+    the whole reply (half-duplex) — muting only until play_end's timing releases
+    too early, because play_end arrives when the audio is queued, not when the
+    speaker has finished playing it, so short replies would echo back.
+    """
+    msg = {"type": "play_begin", "rate": rate, "channels": channels, "bits": bits}
+    if ms is not None:
+        msg["ms"] = ms
+    return json.dumps(msg)
 
 
 def play_end_message() -> str:

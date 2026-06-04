@@ -33,12 +33,14 @@ async def send_wav(ws, path: str) -> None:
     """Stream a WAV to the device to play: play_begin -> binary PCM -> play_end."""
     with wave.open(path, "rb") as w:
         rate, channels, bits = w.getframerate(), w.getnchannels(), w.getsampwidth() * 8
-        data = w.readframes(w.getnframes())
-    await ws.send(play_begin_message(rate, channels, bits))
+        nframes = w.getnframes()
+        data = w.readframes(nframes)
+    ms = round(nframes * 1000 / rate)  # so the device can mute for the full reply
+    await ws.send(play_begin_message(rate, channels, bits, ms=ms))
     for i in range(0, len(data), PLAY_CHUNK_BYTES):
         await ws.send(data[i:i + PLAY_CHUNK_BYTES])
     await ws.send(play_end_message())
-    log.info("sent %d bytes of PCM to device for playback", len(data))
+    log.info("sent %d bytes of PCM (%d ms) to device for playback", len(data), ms)
 
 
 async def _handle_utterance(ws, pcm: bytes, rate: int,
@@ -56,8 +58,11 @@ async def _handle_utterance(ws, pcm: bytes, rate: int,
     if not (path and stt is not None):
         return False
     text = await asyncio.to_thread(stt.transcribe, path)
+    if not text.strip():  # silence/noise/our own echo tail — nothing to say back
+        log.info("utterance had no speech; skipping")
+        return False
     log.info('you said: "%s"', text)
-    if text and tts is not None:
+    if tts is not None:
         wav = await asyncio.to_thread(tts.synthesize, reply_text(text))
         await send_wav(ws, wav)
         return True

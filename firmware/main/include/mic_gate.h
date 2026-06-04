@@ -12,9 +12,13 @@
  *
  * mic_gate_update folds one incoming control frame into the current mute
  * deadline (microseconds, same clock as now_us):
- *   - frame contains "play_begin" -> muted until released (INT64_MAX)
- *   - frame contains "play_end"   -> muted until now_us + tail_us
- *   - any other frame (or NULL)   -> deadline unchanged
+ *   - "play_begin" with an "ms" field -> muted until now_us + ms*1000 + tail_us
+ *     (covers the whole clip; play_begin arrives when audio is queued, so
+ *     now+duration closely tracks when the speaker actually finishes)
+ *   - "play_begin" without "ms"       -> held muted (INT64_MAX) until play_end
+ *   - "play_end"                      -> released no sooner than now_us+tail_us,
+ *     but never shortening an already-set duration mute
+ *   - any other frame (or NULL)       -> deadline unchanged
  * mic_gate_muted reports whether the mic is muted at now_us. */
 int64_t mic_gate_update(int64_t mute_until_us, const char *frame,
                         int64_t now_us, int64_t tail_us);

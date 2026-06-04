@@ -21,6 +21,12 @@ def test_play_begin_carries_format():
     msg = json.loads(play_begin_message(16000, 1, 16))
     assert msg["type"] == "play_begin"
     assert (msg["rate"], msg["channels"], msg["bits"]) == (16000, 1, 16)
+    assert "ms" not in msg  # omitted when not given
+
+
+def test_play_begin_carries_duration():
+    msg = json.loads(play_begin_message(16000, 1, 16, ms=1234))
+    assert msg["ms"] == 1234  # so the device mutes its mic for the whole reply
 
 
 def test_play_end():
