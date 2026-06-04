@@ -27,8 +27,8 @@ def test_silence_only_yields_nothing():
 
 
 def test_speech_then_silence_emits_one_utterance():
-    # defaults: start=5 frames, end=30 frames of silence, pre-roll=10
-    ep = Endpointer()
+    # explicit end_silence so the test is independent of the default hangover
+    ep = Endpointer(end_silence_ms=600)  # 30 frames of silence ends an utterance
     out = ep.feed(voiced(10) + silence(30))
     assert len(out) == 1
     # pre-roll(5 captured before start) + 10 voiced - overlap + 30 silence; just
@@ -52,7 +52,7 @@ def test_short_blip_below_start_is_ignored():
 
 
 def test_two_utterances_separated_by_silence():
-    ep = Endpointer()
+    ep = Endpointer(end_silence_ms=600)  # 30 silent frames per gap
     out = ep.feed(voiced(10) + silence(30) + voiced(10) + silence(30))
     assert len(out) == 2
 

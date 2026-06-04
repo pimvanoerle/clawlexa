@@ -28,9 +28,13 @@ def rms(frame: bytes) -> float:
 
 
 class Endpointer:
+    # Defaults grounded in real captures: idle/silence frames sit around 60-80
+    # RMS, so threshold 400 clears the noise floor by ~5x while still catching
+    # quieter speech; an 800 ms hangover keeps natural mid-sentence pauses from
+    # splitting one utterance into fragments.
     def __init__(self, rate: int = 16000, frame_ms: int = 20,
-                 threshold: float = 500.0, start_ms: int = 100,
-                 end_silence_ms: int = 600, pre_roll_ms: int = 200,
+                 threshold: float = 400.0, start_ms: int = 100,
+                 end_silence_ms: int = 800, pre_roll_ms: int = 200,
                  max_utterance_ms: int = 20000) -> None:
         self.frame_bytes = int(rate * frame_ms / 1000) * 2  # 16-bit samples
         self.threshold = threshold

@@ -127,14 +127,22 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol,
 
 
 async def serve(host: str, port: int, stt: STT | None = None,
-                tts: TTS | None = None) -> None:
+                tts: TTS | None = None, vad_threshold: float | None = None,
+                vad_end_silence_ms: int | None = None) -> None:
     if stt is None:
         log.info("loading STT model (faster-whisper)...")
         stt = WhisperSTT()
     if tts is None:
         log.info("loading TTS voice (piper)...")
         tts = PiperTTS()
-    handler = functools.partial(handle_connection, stt=stt, tts=tts)
+    # Build endpointers with any tuned VAD knobs (None -> Endpointer defaults).
+    ep_kwargs = {}
+    if vad_threshold is not None:
+        ep_kwargs["threshold"] = vad_threshold
+    if vad_end_silence_ms is not None:
+        ep_kwargs["end_silence_ms"] = vad_end_silence_ms
+    handler = functools.partial(handle_connection, stt=stt, tts=tts,
+                                endpointer_factory=lambda rate: Endpointer(rate=rate, **ep_kwargs))
     log.info("clawlexa-bridge listening on ws://%s:%d", host, port)
     async with websockets.serve(handler, host, port):
         await asyncio.Future()  # run until cancelled
