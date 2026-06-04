@@ -11,3 +11,9 @@
  * just outside the visible glass; callers use this to drop them. */
 bool touch_in_circle(int16_t x, int16_t y, int16_t cx, int16_t cy,
                      uint16_t radius);
+
+/* True when the touch INT pin reads its configured active level (a touch is
+ * being signaled). The poll loop gates its I2C read on this so the CST816 is
+ * never read while idle — the chip NACKs reads in standby, which otherwise
+ * floods the console with I2C errors. */
+bool touch_int_active(int int_level, int active_level);

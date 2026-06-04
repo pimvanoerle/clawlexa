@@ -7,3 +7,7 @@ bool touch_in_circle(int16_t x, int16_t y, int16_t cx, int16_t cy,
     /* Compare squared distances to avoid a sqrt (and any float). */
     return dx * dx + dy * dy <= (int32_t)radius * radius;
 }
+
+bool touch_int_active(int int_level, int active_level) {
+    return int_level == active_level;
+}

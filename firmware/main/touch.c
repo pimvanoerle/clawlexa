@@ -2,6 +2,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_log.h"
 
@@ -16,20 +17,27 @@ static const char *TAG = "touch";
 #define TOUCH_POLL_MS   50
 #define PANEL_CENTER    (BOARD_LCD_H_RES / 2)
 #define PANEL_RADIUS    (BOARD_LCD_H_RES / 2)
+#define TOUCH_INT_ACTIVE_LEVEL  0  /* CST816 INT is active-low (tp_cfg.levels.interrupt) */
 
 static esp_lcd_touch_handle_t s_touch;
 
-/* Poll the controller and log taps that land within the round active area. */
+/* Poll the controller and log taps that land within the round active area.
+ * The read is gated on the INT pin: the CST816 NACKs I2C reads while idle
+ * (standby), so reading every tick would flood the log with I2C errors — we
+ * only read when INT signals a touch. */
 static void touch_task(void *arg) {
     (void)arg;
     while (1) {
-        esp_lcd_touch_point_data_t point = {0};
-        uint8_t count = 0;
-        esp_lcd_touch_read_data(s_touch);
-        if (esp_lcd_touch_get_data(s_touch, &point, &count, 1) == ESP_OK && count > 0) {
-            if (touch_in_circle((int16_t)point.x, (int16_t)point.y, PANEL_CENTER,
-                                PANEL_CENTER, PANEL_RADIUS)) {
-                ESP_LOGI(TAG, "(%u, %u)", point.x, point.y);
+        if (touch_int_active(gpio_get_level(BOARD_TOUCH_INT_GPIO),
+                             TOUCH_INT_ACTIVE_LEVEL)) {
+            esp_lcd_touch_point_data_t point = {0};
+            uint8_t count = 0;
+            esp_lcd_touch_read_data(s_touch);
+            if (esp_lcd_touch_get_data(s_touch, &point, &count, 1) == ESP_OK && count > 0) {
+                if (touch_in_circle((int16_t)point.x, (int16_t)point.y, PANEL_CENTER,
+                                    PANEL_CENTER, PANEL_RADIUS)) {
+                    ESP_LOGI(TAG, "(%u, %u)", point.x, point.y);
+                }
             }
         }
         vTaskDelay(pdMS_TO_TICKS(TOUCH_POLL_MS));
