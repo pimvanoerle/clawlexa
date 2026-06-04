@@ -16,6 +16,7 @@ from .audio import AudioRecorder
 from .protocol import parse_message, play_begin_message, play_end_message, welcome_message
 from .stt import STT, WhisperSTT
 from .tts import TTS, PiperTTS
+from .vad import Endpointer
 
 log = logging.getLogger("clawlexa.bridge")
 
@@ -40,17 +41,53 @@ async def send_wav(ws, path: str) -> None:
     log.info("sent %d bytes of PCM to device for playback", len(data))
 
 
+async def _handle_utterance(ws, pcm: bytes, rate: int,
+                            stt: STT | None, tts: TTS | None) -> bool:
+    """Save one VAD-segmented utterance, transcribe it, and speak the reply.
+
+    Returns True if a spoken reply was sent (so the caller can apply half-duplex
+    backoff). STT/TTS are blocking — kept off the event loop with to_thread.
+    """
+    rec = AudioRecorder()
+    rec.begin(rate, 1, 16)
+    rec.write(pcm)
+    path, nbytes = rec.end()
+    log.info("utterance -> %s (%d bytes)", path, nbytes)
+    if not (path and stt is not None):
+        return False
+    text = await asyncio.to_thread(stt.transcribe, path)
+    log.info('you said: "%s"', text)
+    if text and tts is not None:
+        wav = await asyncio.to_thread(tts.synthesize, reply_text(text))
+        await send_wav(ws, wav)
+        return True
+    return False
+
+
 async def handle_connection(ws: websockets.WebSocketServerProtocol,
                             stt: STT | None = None,
-                            tts: TTS | None = None) -> None:
+                            tts: TTS | None = None,
+                            endpointer_factory=None) -> None:
     peer = ws.remote_address
     log.info("device connected from %s", peer)
-    rec = AudioRecorder()
+    make_ep = endpointer_factory or (lambda rate: Endpointer(rate=rate))
+    ep: Endpointer | None = None  # set between audio_begin and audio_end
+    rate = 16000
     try:
         async for message in ws:
-            # Binary frames are PCM audio for the active recording session.
+            # Binary frames are PCM from the device's continuous mic stream;
+            # the VAD endpointer slices them into utterances.
             if isinstance(message, (bytes, bytearray)):
-                rec.write(message)
+                if ep is None:
+                    continue  # stray audio before audio_begin
+                for utt in ep.feed(message):
+                    spoke = await _handle_utterance(ws, utt, rate, stt, tts)
+                    if spoke:
+                        # Half-duplex: we just played a reply. Reset the
+                        # endpointer so any of our own audio the mic caught
+                        # doesn't get treated as a new utterance.
+                        ep = make_ep(rate)
+                        break
                 continue
             try:
                 msg = parse_message(message)
@@ -62,28 +99,25 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol,
                 await ws.send(welcome_message())
                 log.info("sent welcome to %s", msg.get("device", "?"))
             elif mtype == "audio_begin":
-                path = rec.begin(msg.get("rate", 16000), msg.get("channels", 1),
-                                 msg.get("bits", 16))
-                log.info("recording -> %s (%dHz)", path, msg.get("rate", 16000))
+                rate = msg.get("rate", 16000)
+                ep = make_ep(rate)
+                log.info("stream open (%dHz) — VAD endpointing", rate)
             elif mtype == "audio_end":
-                path, nbytes = rec.end()
-                log.info("saved %s (%d bytes)", path, nbytes)
-                if path and stt is not None:
-                    # Transcription can be slow; don't block the event loop.
-                    text = await asyncio.to_thread(stt.transcribe, path)
-                    log.info('you said: "%s"', text)
-                    if text and tts is not None:
-                        # Synthesis is blocking too — keep it off the loop.
-                        wav = await asyncio.to_thread(tts.synthesize, reply_text(text))
-                        await send_wav(ws, wav)
+                if ep is not None:
+                    utt = ep.flush()
+                    if utt:
+                        await _handle_utterance(ws, utt, rate, stt, tts)
+                    ep = None
+                log.info("stream closed")
             else:
                 log.info("recv %r", msg)
     except websockets.ConnectionClosed:
         pass
     finally:
-        if rec.active():  # device dropped mid-stream — keep what we got
-            path, nbytes = rec.end()
-            log.info("saved %s (%d bytes, on disconnect)", path, nbytes)
+        if ep is not None:  # device dropped mid-stream — keep the last utterance
+            utt = ep.flush()
+            if utt:
+                await _handle_utterance(ws, utt, rate, stt, tts)
         log.info("device disconnected from %s", peer)
 
 
