@@ -28,6 +28,15 @@ config CLAWLEXA_BOOT_CHIME
         to keep boot quiet. audio_play_init() runs regardless, so the speaker
         still works for bridge replies.
 
+config CLAWLEXA_WAKE_TEST
+    bool "Wake-word bring-up test (detect only, log on trigger)"
+    default n
+    help
+        Phase 4b bring-up: after init, run only the on-device wake-word detector
+        in a loop and log when it fires (no WiFi/streaming). Say the bring-up
+        word ("okay nabu") and watch for "WAKE:" on the console. Off by default;
+        a dedicated image for validating microWakeWord detection.
+
 config CLAWLEXA_WIFI_SSID
     string "WiFi SSID"
     default ""

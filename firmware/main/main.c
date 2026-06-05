@@ -10,6 +10,7 @@
 #include "touch.h"
 #include "audio.h"
 #include "mic.h"
+#include "wake_detector.h"
 #include "wifi.h"
 #include "ws.h"
 
@@ -78,6 +79,21 @@ void app_main(void) {
     ESP_ERROR_CHECK(mic_init());
 #if CONFIG_CLAWLEXA_MIC_DUMP_ON_BOOT
     ESP_ERROR_CHECK(mic_capture_and_dump(3));
+#endif
+
+#if CONFIG_CLAWLEXA_WAKE_TEST
+    /* Phase 4b bring-up: detect-only loop, no WiFi/streaming. Logs "WAKE:". */
+    if (wake_detector_init()) {
+        ESP_LOGI(TAG, "wake test: say \"okay nabu\"");
+        int16_t wbuf[512];
+        while (1) {
+            int n = mic_read_samples(wbuf, 512);
+            if (n > 0) {
+                wake_detector_feed(wbuf, (size_t) n);
+            }
+        }
+    }
+    ESP_LOGE(TAG, "wake detector init failed");
 #endif
 
     /* Phase 2a/2b: dial the bridge over WebSocket (requires WiFi above). */

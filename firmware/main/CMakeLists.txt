@@ -13,6 +13,7 @@ idf_component_register(
         "mic_sample.c"
         "mic_gate.c"
         "wake_gate.c"
+        "wake_detector.cc"
         "wifi.c"
         "ws.c"
     INCLUDE_DIRS
@@ -36,6 +37,8 @@ idf_component_register(
         esp_websocket_client
     EMBED_FILES
         "assets/boot.wav"
+        "wake_models/okay_nabu.tflite"
+        "wake_models/vad.tflite"
 )
 
 # Stamp the build with a version string so boot logs are traceable.
