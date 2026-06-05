@@ -156,18 +156,23 @@ Candidates:
 | **Porcupine**     | Excellent accuracy, easy training UI                 | Commercial license required beyond personal use |
 
 **Decided (Phase 4):**
-- **Engine: Porcupine (Picovoice).** Best accuracy and a custom keyword is
-  generated instantly in their web console (vs. ESP-Skainet's ~weeks portal
-  turnaround for a custom word). Needs a Picovoice **AccessKey** at runtime and a
-  per-platform `.ppn` keyword file (generate it for the ESP32 platform). Free for
-  personal/eval use; a commercial license is required for distribution — revisit
-  before shipping hardware. microWakeWord stays the open-source fallback if the
-  license becomes a blocker.
-- **Wake word: `clawlexa`** for the generic build (3 syllables, on-brand,
-  detection-friendly). The keyword is a **swappable per-deployment asset** — the
-  `.ppn` file + a config knob — so a specific agent build can flip it (e.g.
-  iPinch → `hey pinchy`) with no code change. This resolves the old "one word per
-  agent" question: one word per build, configurable, not hardcoded.
+- **Engine: microWakeWord.** Open source (Apache-2.0), runs on the ESP32-S3 via
+  TFLite-Micro, custom words trained yourself in a free Colab notebook (no
+  account). It's what ESPHome / Home Assistant voice satellites use. *We
+  originally tried Porcupine (Picovoice) for its instant custom keyword, but
+  reversed it: Picovoice requires a B2B "valid company email" signup and a
+  commercial license — incompatible with an open-source project.* ESP-SR/WakeNet
+  was the other option but can't do a custom word without Espressif's slow portal.
+- **Wake word: `clawlexa`** for the generic build (3 syllables, detection-
+  friendly, on-brand). The model is a **committed `.tflite` asset** — it's ours,
+  Apache-licensed, so we check it into the repo and cloners get a working wake
+  word with no setup. A different word (e.g. iPinch → `hey pinchy`) is a **model
+  swap**: retrain via the notebook, drop in the new `.tflite`, point a config knob
+  at it. No per-clone manual step for the default word.
+- **Bring-up plan.** De-risk the firmware integration first with a *pre-trained*
+  community model (e.g. "okay nabu" / "hey jarvis"), prove the on-device pipeline
+  end-to-end, then swap in the trained `clawlexa` model. The custom word is then
+  just a file, not a blocker.
 - **Gating architecture.** The wake detector flips a small device-side state
   machine LISTENING→STREAMING; the mic only streams a turn after the word fires,
   and returns to LISTENING when the turn ends (the bridge's reply completes, or a
