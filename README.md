@@ -39,5 +39,9 @@ iPinch build), you train a small [microWakeWord](https://github.com/OHF-Voice/mi
 model and drop it in — see **[training/README.md](./training/README.md)** for the
 full (phrase-parameterized) recipe and the one-block firmware swap.
 
+**Connecting your own agent?** See **[docs/connect-your-agent.md](./docs/connect-your-agent.md)** —
+get the bridge running on your laptop and wire your MCP agent (iPinch, Claude
+Desktop, …) to the device's `wait_for_utterance` / `speak` tools.
+
 See [SPEC.md](./SPEC.md) for the design, [firmware/README.md](./firmware/README.md)
 for build/flash, and [CLAUDE.md](./CLAUDE.md) for working-with-Claude-Code notes.
