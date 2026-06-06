@@ -25,8 +25,10 @@
 
 static const char *TAG = "display";
 
-/* The single centered label — "hello" at boot, then driven by the agent via
- * display_set_state() / display_show() (Phase 6). */
+/* The screen + its single centered label — "hello" at boot, then driven by the
+ * agent via display_set_state() / display_show() (Phase 6). set_state glows the
+ * whole background the state color (ambient indicator); the label rides on top. */
+static lv_obj_t *s_screen;
 static lv_obj_t *s_label;
 
 #define LCD_HOST            SPI2_HOST
@@ -56,18 +58,26 @@ static esp_err_t init_i2c(i2c_master_bus_handle_t *out_bus) {
 
 /* The LCD reset line hangs off PCA9554 pin 2, not an MCU GPIO. Bring the
  * expander up and pulse reset active-low, then release. */
+/* Reset lines hanging off the PCA9554: EXIO2 = LCD_RST (confirmed), EXIO0/EXIO1
+ * = the CST816 touch reset. Pulse all three together at boot. Crucially this
+ * resets the touch chip too — without it the CST816 only resets on a cold
+ * power-on, so on warm reboots it sits in a stale/standby state and NACKs its
+ * I2C ID read (touch_init then fails). EXIO3/4/5 are SD-CS / IMU — leave alone. */
+#define LCD_TOUCH_RESET_PINS \
+    (IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1 | IO_EXPANDER_PIN_NUM_2)
+
 static esp_err_t reset_lcd_via_expander(i2c_master_bus_handle_t i2c_bus) {
     esp_io_expander_handle_t io_expander = NULL;
     ESP_RETURN_ON_ERROR(esp_io_expander_new_i2c_tca9554(
                             i2c_bus, BOARD_IO_EXPANDER_ADDR, &io_expander),
                         TAG, "PCA9554 init failed");
-    ESP_RETURN_ON_ERROR(esp_io_expander_set_dir(io_expander, IO_EXPANDER_PIN_NUM_2,
+    ESP_RETURN_ON_ERROR(esp_io_expander_set_dir(io_expander, LCD_TOUCH_RESET_PINS,
                                                 IO_EXPANDER_OUTPUT),
                         TAG, "expander set_dir failed");
-    ESP_RETURN_ON_ERROR(esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_2, 0),
+    ESP_RETURN_ON_ERROR(esp_io_expander_set_level(io_expander, LCD_TOUCH_RESET_PINS, 0),
                         TAG, "expander reset assert failed");
     vTaskDelay(pdMS_TO_TICKS(20));
-    ESP_RETURN_ON_ERROR(esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_2, 1),
+    ESP_RETURN_ON_ERROR(esp_io_expander_set_level(io_expander, LCD_TOUCH_RESET_PINS, 1),
                         TAG, "expander reset release failed");
     vTaskDelay(pdMS_TO_TICKS(120));
     return ESP_OK;
@@ -225,6 +235,7 @@ static esp_err_t init_lvgl_and_hello(esp_lcd_panel_io_handle_t io_handle,
     /* All LVGL calls must hold the port lock. */
     if (lvgl_port_lock(0)) {
         lv_obj_t *scr = lv_display_get_screen_active(disp);
+        s_screen = scr;
         /* Pure-black background. NB: this panel shows very faint mura banding in
          * its center region on pure black only — confirmed cosmetic (a solid
          * color fill is perfectly clean), so not worth chasing in firmware. */
@@ -239,33 +250,33 @@ static esp_err_t init_lvgl_and_hello(esp_lcd_panel_io_handle_t io_handle,
     return ESP_OK;
 }
 
-/* Per-state color for the ambient status word. */
+/* Per-state ambient background color (idle is plain black). */
 static lv_color_t state_color(const char *state) {
     if (strcmp(state, "listening") == 0) return lv_color_hex(0x2196F3);  /* blue */
     if (strcmp(state, "thinking") == 0) return lv_color_hex(0xFFC107);   /* amber */
     if (strcmp(state, "speaking") == 0) return lv_color_hex(0x4CAF50);   /* green */
     if (strcmp(state, "error") == 0) return lv_color_hex(0xF44336);      /* red */
-    return lv_color_white();  /* idle / unknown */
+    return lv_color_black();  /* idle / unknown */
 }
 
-void display_set_state(const char *state) {
-    if (s_label == NULL) return;
+/* Paint the whole screen `bg` and show `label` in white centered on top. */
+static void paint(lv_color_t bg, const char *label) {
+    if (s_screen == NULL || s_label == NULL) return;
     if (lvgl_port_lock(0)) {
-        lv_label_set_text(s_label, state);
-        lv_obj_set_style_text_color(s_label, state_color(state), 0);
-        lv_obj_center(s_label);
-        lvgl_port_unlock();
-    }
-}
-
-void display_show(const char *text) {
-    if (s_label == NULL) return;
-    if (lvgl_port_lock(0)) {
-        lv_label_set_text(s_label, text);
+        lv_obj_set_style_bg_color(s_screen, bg, 0);
+        lv_label_set_text(s_label, label);
         lv_obj_set_style_text_color(s_label, lv_color_white(), 0);
         lv_obj_center(s_label);
         lvgl_port_unlock();
     }
+}
+
+void display_set_state(const char *state) {
+    paint(state_color(state), state);   /* background glows the state color */
+}
+
+void display_show(const char *text) {
+    paint(lv_color_black(), text);      /* messages: white on black */
 }
 
 esp_err_t display_init(i2c_master_bus_handle_t *out_i2c_bus) {
