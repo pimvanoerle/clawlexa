@@ -292,7 +292,13 @@ Nothing in here yet — created as each phase starts.
       (`vad.py`); half-duplex — the device mutes its mic across the bridge's
       playback (`mic_gate`, host-tested). 3a/3b's racy once-per-boot trigger is
       retired.
-- [ ] **Phase 4** — Wake word on device. Audio only streams post-trigger.
+- [~] **Phase 4** — Wake word on device. Audio only streams post-trigger.
+      **Firmware DONE + verified** (microWakeWord via esp-tflite-micro): device
+      listens locally, and only after the wake word fires does it stream the
+      command to the bridge, get a spoken reply, and return to silent listening
+      (`wake_detector` + `wake_gate` gating `mic_stream_task`). Bring-up word is
+      `okay nabu`; remaining: train + swap in a custom `clawlexa` model (reusable
+      trainer so iPinch can mint `okay iPinch`), and write the README docs.
 - [ ] **Phase 5** — MCP server wrapper around the bridge. Wire to iPinch.
 - [ ] **Phase 6** — Display states + basic touch (push-to-talk, mute,
       cancel).
