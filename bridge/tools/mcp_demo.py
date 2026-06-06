@@ -55,11 +55,11 @@ async def main() -> None:
             print(f"[demo] connected; tools: {[t.name for t in tools.tools]}", file=sys.stderr)
             print("[demo] say your wake word then talk; Ctrl-C to quit", file=sys.stderr)
             while True:
-                # Drive the device's ambient status display around the turn.
-                await session.call_tool("set_state", {"state": "listening"})
+                # Rest in idle between turns — we're just waiting for the wake
+                # word here (the actual command capture is bridge-side and brief).
+                await session.call_tool("set_state", {"state": "idle"})
                 text = _text(await session.call_tool("wait_for_utterance", {}))
                 if not text:
-                    await session.call_tool("set_state", {"state": "idle"})
                     continue
                 print(f"[demo] heard: {text!r}", file=sys.stderr)
                 await session.call_tool("set_state", {"state": "thinking"})
@@ -67,7 +67,7 @@ async def main() -> None:
                 print(f"[demo] reply: {reply!r}", file=sys.stderr)
                 await session.call_tool("set_state", {"state": "speaking"})
                 await session.call_tool("speak", {"text": reply})
-                await session.call_tool("set_state", {"state": "idle"})
+                # loops back to idle
 
 
 if __name__ == "__main__":
