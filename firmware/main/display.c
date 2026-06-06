@@ -21,6 +21,7 @@
 
 #include "board.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static const char *TAG = "display";
@@ -271,8 +272,20 @@ static void paint(lv_color_t bg, const char *label) {
     }
 }
 
+/* A little ASCII crab whose face matches the mood (V = claws, middle = eyes). */
+static const char *crab_face(const char *state) {
+    if (strcmp(state, "listening") == 0) return "V (o  o) V";   /* attentive */
+    if (strcmp(state, "thinking") == 0)  return "V (o  o) V\n?";  /* pondering */
+    if (strcmp(state, "speaking") == 0)  return "V (^  ^) V";   /* happy */
+    if (strcmp(state, "error") == 0)     return "V (x  x) V";   /* oops */
+    return "v (-  -) v\nz z z";  /* idle: sleeping */
+}
+
 void display_set_state(const char *state) {
-    paint(state_color(state), state);   /* background glows the state color */
+    /* crab on top, the state word underneath; background glows the state color. */
+    char buf[48];
+    snprintf(buf, sizeof(buf), "%s\n\n%s", crab_face(state), state);
+    paint(state_color(state), buf);
 }
 
 void display_show(const char *text) {
