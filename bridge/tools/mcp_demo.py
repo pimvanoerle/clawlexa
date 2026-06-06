@@ -27,6 +27,22 @@ def _text(result) -> str:
     return result.content[0].text if result.content else ""
 
 
+def demo_reply(text: str) -> str:
+    """The 'agent'. A real agent (iPinch) replaces this with its LLM — the point
+    is that the *agent*, not the bridge, decides what to say. A few toy intents
+    here so the reply is audibly agent-chosen, not a mechanical echo."""
+    t = text.lower().strip(" .!?")
+    if t in ("hi", "hello", "hey") or t.startswith(("hello", "hi ")):
+        return "Hey there! I'm the demo agent, talking to you over MCP."
+    if "weather" in t:
+        return "I can't check the weather yet, but the whole MCP loop is working."
+    if "your name" in t or "who are you" in t:
+        return "I'm clawlexa — your words reached an agent through MCP and back."
+    if "thank" in t:
+        return "You're welcome!"
+    return f"The agent heard you say: {text}"
+
+
 async def main() -> None:
     # Spawn the bridge as our MCP server. This same StdioServerParameters block
     # is what a real agent (iPinch) would put in its MCP server config.
@@ -43,8 +59,9 @@ async def main() -> None:
                 if not text:
                     continue
                 print(f"[demo] heard: {text!r}", file=sys.stderr)
-                # A real agent thinks here. We just echo it back.
-                await session.call_tool("speak", {"text": f"You said: {text}"})
+                reply = demo_reply(text)  # a real agent's LLM goes here
+                print(f"[demo] reply: {reply!r}", file=sys.stderr)
+                await session.call_tool("speak", {"text": reply})
 
 
 if __name__ == "__main__":
