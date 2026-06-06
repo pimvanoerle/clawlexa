@@ -98,6 +98,8 @@ esp_err_t gpio_set_level(gpio_num_t pin, uint32_t level) {
 
 int gpio_get_level(gpio_num_t pin) { (void)pin; return 0; }
 
+int64_t esp_timer_get_time(void) { return 0; }
+
 void *heap_caps_calloc(size_t n, size_t size, uint32_t caps) {
     (void)caps;
     faked_record("heap_caps_calloc");

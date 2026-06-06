@@ -97,6 +97,9 @@ esp_err_t gpio_config(const gpio_config_t *cfg);
 esp_err_t gpio_set_level(gpio_num_t pin, uint32_t level);
 int gpio_get_level(gpio_num_t pin);
 
+/* ---- esp_timer ----------------------------------------------------------- */
+int64_t esp_timer_get_time(void);
+
 /* ---- driver/ledc (PWM backlight) ----------------------------------------- */
 typedef enum { LEDC_LOW_SPEED_MODE = 1 } ledc_mode_t;
 typedef enum { LEDC_TIMER_0 = 0 } ledc_timer_t;

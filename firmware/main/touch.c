@@ -5,6 +5,7 @@
 #include "driver/gpio.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_touch_cst816s.h"
@@ -18,6 +19,7 @@ static const char *TAG = "touch";
 #define PANEL_CENTER    (BOARD_LCD_H_RES / 2)
 #define PANEL_RADIUS    (BOARD_LCD_H_RES / 2)
 #define TOUCH_INT_ACTIVE_LEVEL  0  /* CST816 INT is active-low (tp_cfg.levels.interrupt) */
+#define TAP_DEBOUNCE_US (400 * 1000)  /* collapse a press's INT pulses into one tap */
 
 static esp_lcd_touch_handle_t s_touch;
 static void (*s_tap_cb)(void);  /* fired once per press (set by touch_set_tap_callback) */
@@ -33,6 +35,7 @@ void touch_set_tap_callback(void (*cb)(void)) {
 static void touch_task(void *arg) {
     (void)arg;
     bool was_touching = false;
+    int64_t last_tap_us = -TAP_DEBOUNCE_US;
     while (1) {
         bool touching = false;
         if (touch_int_active(gpio_get_level(BOARD_TOUCH_INT_GPIO),
@@ -44,7 +47,12 @@ static void touch_task(void *arg) {
                 touch_in_circle((int16_t)point.x, (int16_t)point.y, PANEL_CENTER,
                                 PANEL_CENTER, PANEL_RADIUS)) {
                 touching = true;
-                if (!was_touching) {  /* rising edge = one tap */
+                /* Rising edge AND past the debounce window — a held finger
+                 * pulses INT several times, which would otherwise read as a
+                 * burst of taps (open-then-cancel). */
+                int64_t now = esp_timer_get_time();
+                if (!was_touching && now - last_tap_us > TAP_DEBOUNCE_US) {
+                    last_tap_us = now;
                     ESP_LOGI(TAG, "tap (%u, %u)", point.x, point.y);
                     if (s_tap_cb != NULL) {
                         s_tap_cb();
