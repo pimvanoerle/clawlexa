@@ -312,9 +312,12 @@ Nothing in here yet — created as each phase starts.
       `okay nabu`; remaining: train + swap in a custom `clawlexa` model (reusable
       trainer so iPinch can mint `okay iPinch`), and write the README docs.
 - [~] **Phase 5** — MCP server wrapper around the bridge. Wire to iPinch.
-      **Bridge MCP server done** (`--mcp`, stdio): `wait_for_utterance` + `speak`
-      tools over a shared `Hub`, tested in-memory. Remaining: wire it to iPinch
-      and validate the full agent loop live on the device.
+      **Bridge MCP server done + verified live** (`--mcp`, stdio): `wait_for_utterance`
+      + `speak` over a shared `Hub`. A demo MCP agent (`bridge/tools/mcp_demo.py`)
+      drove the device end-to-end — wake → command → agent picks a reply → spoken
+      back. Build-time integration tests cover the protocol path. Remaining: wire
+      the real iPinch (swap `demo_reply` for its LLM); minor: wake word can bleed
+      into the transcript.
 - [ ] **Phase 6** — Display states + basic touch (push-to-talk, mute,
       cancel).
 - [ ] **Phase 7** — Second-agent integration (ourclaw or Claude Desktop) to

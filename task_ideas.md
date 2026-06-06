@@ -337,3 +337,30 @@ When a task is T5-only at face value, decompose it: list the device-free slices
   not restart anything, and a TURN_END while already LISTENING is a no-op.
 - **Device-free slice (T2):** `test_wake_gate.c` drives every (state, event) pair
   — no detector, no audio, no board. The detector + on-device gating is T5.
+
+### MCP-1 — Wrap the bridge as an MCP server (agent drives the voice loop)
+- **Anchor:** commits 0103712 + a340b97 ("Phase 5").
+- **Prompt:** "Expose the bridge's voice loop over MCP so an agent — not a
+  hardcoded echo — decides the reply."
+- **Done-correctly:** a shared `Hub` links the device WebSocket to MCP tools;
+  `wait_for_utterance(timeout_ms?)` blocks until the user speaks (post-wake) and
+  returns the transcript, `speak(text)` plays a reply. In MCP mode the transcript
+  goes to the agent (no standalone echo). v1 transport is stdio; logs to stderr so
+  stdout stays the clean protocol stream; models load before stdio starts.
+  **Footgun:** MCP has no clean server-push — a pull-based `wait_for_utterance`
+  beats reaching for `notifications/*`.
+- **Device-free slices:** `test_hub.py` (queue + speak with fakes, T-host) and
+  `test_mcp_integration.py` (a real MCP client over the SDK's in-memory transport
+  exercises list_tools / wait / speak / timeout — full protocol path, no device,
+  no subprocess). `tools/mcp_demo.py` is the live demo + agent-wiring reference.
+
+### WW-3 — Wake word bleeds into the streamed command
+- **Anchor:** Phase 4b wake-gated firmware onward.
+- **Prompt:** "Sometimes the transcript includes the wake word ('okay nabu,
+  what's your name' instead of 'what's your name'). Fix it."
+- **Done-correctly:** the device starts streaming the instant the wake word fires,
+  so the tail of the wake word is still in the mic buffer and gets sent. Options:
+  a short (~100-150 ms) skip after detection before streaming, dropping the
+  detector's trailing window, or stripping a leading wake-token on the bridge.
+  Tell: the transcript no longer contains the wake word.
+- **Verification tier:** T5 (live audio); minor — intent usually still matches.
