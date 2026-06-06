@@ -60,8 +60,19 @@ esp_err_t touch_init(i2c_master_bus_handle_t i2c_bus) {
             .interrupt = 0,
         },
     };
-    ESP_RETURN_ON_ERROR(esp_lcd_touch_new_i2c_cst816s(tp_io, &tp_cfg, &s_touch),
-                        TAG, "CST816 init failed");
+    /* The CST816 NACKs I2C reads when idle/in standby, so its boot ID-read can
+     * fail intermittently — retry a few times before giving up. */
+    esp_err_t err = ESP_FAIL;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        err = esp_lcd_touch_new_i2c_cst816s(tp_io, &tp_cfg, &s_touch);
+        if (err == ESP_OK) {
+            break;
+        }
+        ESP_LOGW(TAG, "CST816 init attempt %d failed (%s); retrying",
+                 attempt, esp_err_to_name(err));
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    ESP_RETURN_ON_ERROR(err, TAG, "CST816 init failed");
 
     ESP_RETURN_ON_FALSE(
         xTaskCreate(touch_task, "touch", 3072, NULL, 4, NULL) == pdPASS,

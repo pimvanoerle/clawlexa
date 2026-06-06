@@ -55,9 +55,10 @@ class StreamModel {
     bool load() {
         register_ops_();
         var_arena_ = (uint8_t *) heap_caps_malloc(VAR_ARENA_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        tensor_arena_ = (uint8_t *) heap_caps_malloc(arena_size_, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        /* Tensor arena in PSRAM — generous, keeps internal RAM for WiFi/LVGL. */
+        tensor_arena_ = (uint8_t *) heap_caps_malloc(arena_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (var_arena_ == nullptr || tensor_arena_ == nullptr) {
-            ESP_LOGE(TAG, "arena alloc failed (%zu + %d bytes)", arena_size_, VAR_ARENA_SIZE);
+            ESP_LOGE(TAG, "arena alloc failed (%u + %d bytes)", (unsigned) arena_size_, VAR_ARENA_SIZE);
             return false;
         }
         tflite::MicroAllocator *ma = tflite::MicroAllocator::Create(var_arena_, VAR_ARENA_SIZE);
@@ -70,14 +71,14 @@ class StreamModel {
         }
         interp_ = std::make_unique<tflite::MicroInterpreter>(model, resolver_, tensor_arena_, arena_size_, mrv);
         if (interp_->AllocateTensors() != kTfLiteOk) {
-            ESP_LOGE(TAG, "AllocateTensors failed (arena %zu too small?)", arena_size_);
+            ESP_LOGE(TAG, "AllocateTensors failed (arena %u too small?)", (unsigned) arena_size_);
             return false;
         }
         stride_ = interp_->input(0)->dims->data[1];
         recent_.assign(window_, 0);
         ignore_ = -MIN_SLICES_BEFORE_DETECTION;
-        ESP_LOGI(TAG, "streaming model loaded: stride=%d arena=%zu cutoff=%u win=%d",
-                 stride_, arena_size_, cutoff_, window_);
+        ESP_LOGI(TAG, "streaming model loaded: stride=%d arena_used=%u cutoff=%u win=%d",
+                 stride_, (unsigned) interp_->arena_used_bytes(), cutoff_, window_);
         return true;
     }
 
@@ -164,8 +165,8 @@ tflite::MicroMutableOpResolver<18> g_prep_resolver;
 std::unique_ptr<tflite::MicroInterpreter> g_prep_interp;
 std::vector<int16_t> g_samples;  // sample accumulator across feed() calls
 
-StreamModel g_wake(okay_nabu_start, 0.97f, 5, 28000);
-StreamModel g_vad(vad_start, 0.50f, 5, 22000);
+StreamModel g_wake(okay_nabu_start, 0.97f, 5, 96 * 1024);
+StreamModel g_vad(vad_start, 0.50f, 5, 96 * 1024);
 bool g_ready = false;
 
 bool init_preprocessor_() {

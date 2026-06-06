@@ -62,7 +62,11 @@ void app_main(void) {
      * backlight comes on at the end of display_init (after the WiFi spike). */
     i2c_master_bus_handle_t i2c_bus = NULL;
     ESP_ERROR_CHECK(display_init(&i2c_bus));
-    ESP_ERROR_CHECK(touch_init(i2c_bus));
+    /* Touch is non-fatal: a flaky CST816 (it NACKs I2C reads in standby) must
+     * not brick voice. Log and continue if it doesn't come up. */
+    if (touch_init(i2c_bus) != ESP_OK) {
+        ESP_LOGW(TAG, "touch unavailable; continuing without it");
+    }
 
     /* Phase 1c: audio playback. audio_play_init() always runs (needed for TTS
      * replies); the boot chime is opt-in (CONFIG_CLAWLEXA_BOOT_CHIME) to keep
