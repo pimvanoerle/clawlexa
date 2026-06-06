@@ -59,12 +59,14 @@ Normally you don't run this by hand — your agent spawns it (next step).
 
 ## 5. Wire your agent
 
-clawlexa exposes two MCP tools:
+clawlexa exposes these MCP tools:
 
 | Tool | What it does |
 |------|--------------|
 | `wait_for_utterance(timeout_ms?)` | Blocks until the user speaks to the device (after the on-device wake word fires) and returns the transcript. Returns `""` on timeout. |
 | `speak(text)` | Speaks `text` aloud on the device (TTS). |
+| `set_state(state)` | Sets the device's ambient mood/indicator: `idle` \| `listening` \| `thinking` \| `speaking` \| `error`. |
+| `show(text)` | Shows a short line of text on the device screen. |
 
 Add the bridge as an MCP server in your agent's config (Claude Code / Claude
 Desktop style — adapt for iPinch):
@@ -92,6 +94,62 @@ await mcp.call_tool("speak", {"text": reply})
 A complete, runnable reference is **[`bridge/tools/mcp_demo.py`](../bridge/tools/mcp_demo.py)** —
 it spawns the bridge and runs exactly this loop with a toy responder. Swap its
 `demo_reply()` for your agent's brain and you're done.
+
+> **Don't add clawlexa to a chat agent's shared MCP config.** `wait_for_utterance`
+> *blocks*, so if it's just another server on your Slack/chat agent the model can
+> call it and hang the conversation. Voice wants its **own** driver process (below).
+
+## 5b. Production shape: the standalone voice driver
+
+For a real always-on agent, use **[`bridge/tools/voice_agent.py`](../bridge/tools/voice_agent.py)**
+instead of the demo. It spawns the bridge as its *private* MCP server (so voice
+stays isolated from your other surfaces), owns the loop, drives the mood crab
+(`set_state`), and routes each utterance through a **brain** — by default headless
+`claude -p` run in a directory you choose, so it answers with that project's
+persona/context:
+
+```bash
+.venv/bin/python tools/voice_agent.py \
+  --brain-cmd /path/to/claude \
+  --brain-cwd /path/to/your/agent-vault \      # its CLAUDE.md / memory load from here
+  --idle-timeout 150 \
+  --memory-prompt "The voice chat paused. Save a short note to memory/{date}_voice_session.md and append a line to memory/channel_voice.md. Reply: ok"
+```
+
+**Memory — so the crab remembers:**
+- *Within a conversation:* the Claude brain keeps a session and `--resume`s it each
+  turn, so it remembers earlier turns.
+- *Across conversations:* after `--idle-timeout` seconds of silence, one final
+  `--resume` turn runs your `--memory-prompt` (with write tools enabled) so the
+  brain persists a session note — mirroring how a chat agent saves memory. `{date}`
+  expands to `YYYY_MM_DD`. Omit `--memory-prompt` to disable.
+
+The brain just needs its model auth in the environment (e.g. `ANTHROPIC_API_KEY`)
+and, for the `claude` CLI specifically, `node` on `PATH`.
+
+### Run it on boot (macOS LaunchAgent)
+
+Wrap the invocation in a small launcher script (it can `export` the auth/PATH and
+`cd` to the bridge), then drop a `~/Library/LaunchAgents/<your.label>.plist`:
+
+```xml
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.example.clawlexa-voice</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/sh</string><string>/path/to/run-voice-agent.sh</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/path/to/logs/voice-agent.log</string>
+  <key>StandardErrorPath</key><string>/path/to/logs/voice-agent.log</string>
+</dict></plist>
+```
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.clawlexa-voice.plist
+```
+
+It then auto-starts at login and restarts on crash. (`launchctl bootout
+gui/$(id -u)/<label>` to stop it.)
 
 ## 6. Sanity check (no agent needed)
 
