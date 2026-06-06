@@ -16,6 +16,8 @@
 #include "audio.h"
 #include "mic.h"
 #include "mic_gate.h"
+#include "wake_detector.h"
+#include "wake_gate.h"
 
 static const char *TAG = "ws";
 
@@ -24,10 +26,12 @@ static const char *TAG = "ws";
 #define WS_CONT_OPCODE   0x00
 #define MIC_FRAME_SAMPLES 256   /* 16 ms per binary frame @ 16 kHz */
 #define MIC_PLAYBACK_TAIL_US 300000  /* keep mic muted 300 ms past playback */
+#define WAKE_TURN_TIMEOUT_US (10 * 1000000)  /* end a turn if the bridge never replies */
 
 static esp_websocket_client_handle_t s_client;
 static volatile bool s_connected;
 static volatile int64_t s_mute_until_us;  /* half-duplex: mute mic while we speak */
+static volatile bool s_turn_end;  /* set on play_end: the bridge's reply finished */
 
 static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg;
@@ -61,6 +65,10 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data
             s_mute_until_us = mic_gate_update(s_mute_until_us, ctrl,
                                               esp_timer_get_time(),
                                               MIC_PLAYBACK_TAIL_US);
+            /* play_end means the reply finished — close the wake-triggered turn. */
+            if (strstr(ctrl, "play_end") != NULL) {
+                s_turn_end = true;
+            }
         } else if ((e->op_code == WS_BIN_OPCODE || e->op_code == WS_CONT_OPCODE) &&
                    e->data_len >= 2) {
             audio_play_pcm((const int16_t *)e->data_ptr, e->data_len / 2);
@@ -103,44 +111,66 @@ bool ws_is_connected(void) {
     return s_connected;
 }
 
-/* Continuously stream the mic to the bridge. Opens a fresh audio session
- * (audio_begin) on each (re)connection, then forwards 16-bit PCM frames. The
- * bridge endpoints utterances with its own VAD, so there is no per-utterance
- * audio_end — the stream is open for the life of the connection. */
+/* Wake-gated mic loop (Phase 4b). In LISTENING the mic only feeds the on-device
+ * wake detector — nothing leaves the device. When the wake word fires, open a
+ * streaming turn (audio_begin -> PCM frames) so the bridge transcribes the
+ * command; the turn ends — audio_end, back to LISTENING — when the bridge's
+ * reply finishes (play_end) or a no-reply timeout elapses. Half-duplex: while
+ * our own reply plays we neither stream nor listen (mic_gate covers the clip). */
 static void mic_stream_task(void *arg) {
     (void)arg;
+    if (!wake_detector_init()) {
+        ESP_LOGE(TAG, "wake detector init failed; mic will stay silent");
+    }
     int16_t buf[MIC_FRAME_SAMPLES];
-    bool streaming = false;
+    wake_state_t state = WAKE_LISTENING;
+    int64_t turn_deadline = 0;
     while (1) {
-        if (!s_connected) {
-            streaming = false;
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
-        }
-        if (!streaming) {
-            const char *begin =
-                "{\"type\":\"audio_begin\",\"rate\":16000,\"channels\":1,\"bits\":16}";
-            esp_websocket_client_send_text(s_client, begin, strlen(begin), portMAX_DELAY);
-            ESP_LOGI(TAG, "mic stream started");
-            streaming = true;
-        }
         int got = mic_read_samples(buf, MIC_FRAME_SAMPLES);
         if (got <= 0) {
             vTaskDelay(pdMS_TO_TICKS(5));
             continue;
         }
-        /* Half-duplex: keep draining the mic DMA while muted, but don't forward
-         * our own speaker output back to the bridge. */
-        if (mic_gate_muted(s_mute_until_us, esp_timer_get_time())) {
+        int64_t now = esp_timer_get_time();
+
+        if (state == WAKE_LISTENING) {
+            /* Don't react to our own reply still draining from the speaker. */
+            if (mic_gate_muted(s_mute_until_us, now)) {
+                continue;
+            }
+            if (wake_detector_feed(buf, (size_t) got) && s_connected) {
+                ESP_LOGI(TAG, "wake -> streaming a turn");
+                state = wake_gate_next(state, WAKE_EV_WAKE);
+                s_turn_end = false;
+                const char *begin =
+                    "{\"type\":\"audio_begin\",\"rate\":16000,\"channels\":1,\"bits\":16}";
+                esp_websocket_client_send_text(s_client, begin, strlen(begin), portMAX_DELAY);
+                turn_deadline = now + WAKE_TURN_TIMEOUT_US;
+            }
             continue;
         }
-        if (esp_websocket_client_send_bin(s_client, (const char *)buf,
-                                          got * (int)sizeof(int16_t), portMAX_DELAY) < 0) {
-            ESP_LOGW(TAG, "mic send failed");
+
+        /* WAKE_STREAMING: forward the command to the bridge. */
+        if (!s_connected) {  /* lost the link mid-turn */
+            state = wake_gate_next(state, WAKE_EV_TURN_END);
+            continue;
+        }
+        if (!mic_gate_muted(s_mute_until_us, now)) {  /* half-duplex */
+            if (esp_websocket_client_send_bin(s_client, (const char *)buf,
+                                              got * (int)sizeof(int16_t), portMAX_DELAY) < 0) {
+                ESP_LOGW(TAG, "mic send failed");
+            }
+        }
+        if (s_turn_end || now > turn_deadline) {
+            ESP_LOGI(TAG, "turn end -> listening");
+            const char *end = "{\"type\":\"audio_end\"}";
+            esp_websocket_client_send_text(s_client, end, strlen(end), portMAX_DELAY);
+            state = wake_gate_next(state, WAKE_EV_TURN_END);
         }
     }
 }
 
 void ws_stream_mic_start(void) {
-    xTaskCreate(mic_stream_task, "mic_stream", 4096, NULL, 5, NULL);
+    /* 8 KB stack — the wake detector runs TFLite-Micro inference in this task. */
+    xTaskCreate(mic_stream_task, "mic_stream", 8192, NULL, 5, NULL);
 }
