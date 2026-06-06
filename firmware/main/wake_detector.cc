@@ -34,6 +34,19 @@ static const char *TAG = "wake";
 extern const uint8_t okay_nabu_start[] asm("_binary_okay_nabu_tflite_start");
 extern const uint8_t vad_start[] asm("_binary_vad_tflite_start");
 
+/* ====================== Wake word selection ==============================
+ * To use a different wake word (e.g. a trained "clawlexa" or "okay iPinch"):
+ *   1. Train a microWakeWord model — see training/README.md.
+ *   2. Drop <word>.tflite into main/wake_models/ and add it to EMBED_FILES.
+ *   3. Point the three macros below at it (symbol, label, and the manifest's
+ *      probability_cutoff). The default is the zero-setup bring-up word.
+ * The symbol is "_binary_<file>_tflite_start" for "<file>.tflite". */
+#define WAKE_MODEL_START   okay_nabu_start
+#define WAKE_WORD_LABEL    "okay nabu"
+#define WAKE_CUTOFF        0.97f   /* from the model's .json manifest */
+#define WAKE_SLIDING_WINDOW 5
+/* ========================================================================= */
+
 namespace {
 
 constexpr uint8_t quantize_cutoff(float cutoff) {
@@ -165,7 +178,7 @@ tflite::MicroMutableOpResolver<18> g_prep_resolver;
 std::unique_ptr<tflite::MicroInterpreter> g_prep_interp;
 std::vector<int16_t> g_samples;  // sample accumulator across feed() calls
 
-StreamModel g_wake(okay_nabu_start, 0.97f, 5, 96 * 1024);
+StreamModel g_wake(WAKE_MODEL_START, WAKE_CUTOFF, WAKE_SLIDING_WINDOW, 96 * 1024);
 StreamModel g_vad(vad_start, 0.50f, 5, 96 * 1024);
 bool g_ready = false;
 
@@ -213,7 +226,7 @@ extern "C" bool wake_detector_init(void) {
     if (!g_wake.load() || !g_vad.load()) return false;
     g_samples.reserve(WINDOW_SAMPLES * 4);
     g_ready = true;
-    ESP_LOGI(TAG, "wake detector ready (okay_nabu + vad)");
+    ESP_LOGI(TAG, "wake detector ready (%s + vad)", WAKE_WORD_LABEL);
     return true;
 }
 
@@ -229,7 +242,7 @@ extern "C" bool wake_detector_feed(const int16_t *samples, size_t count) {
         g_vad.infer(feats);
         if (g_wake.consume_new() && g_wake.detected()) {
             if (g_vad.active()) {
-                ESP_LOGI(TAG, "WAKE: okay nabu (p=%u)", g_wake.latest());
+                ESP_LOGI(TAG, "WAKE: %s (p=%u)", WAKE_WORD_LABEL, g_wake.latest());
                 fired = true;
             } else {
                 ESP_LOGD(TAG, "wake blocked by vad (p=%u)", g_wake.latest());
