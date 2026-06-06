@@ -96,10 +96,22 @@ polling tool):**
   completes (so the agent can pre-empt)
 - `device_status(battery, rssi, ...)` — periodic health
 
+**Implemented (Phase 5, v1):**
+- **Transport: stdio** (FastMCP) — how an agent normally adds an MCP server.
+  `python -m clawlexa_bridge --mcp` runs the device WebSocket server + the MCP
+  stdio server on one loop, sharing a `Hub` (utterance queue + speak()).
+- **Tools: `wait_for_utterance(timeout_ms?)`** (blocks until the user speaks
+  after the wake word; returns the transcript) and **`speak(text)`**. Pull-based
+  `wait_for_utterance` resolves the server-push question below — the agent pulls
+  rather than the server pushing. In MCP mode the device's transcript goes to the
+  agent (no standalone echo); the agent replies via `speak`.
+- Deferred to later phases: `show`/`set_state` (need display states — Phase 6),
+  `listen`/`stop_speaking`, and the `touch`/`wake_detected`/`device_status`
+  events. HTTP/SSE transport (for a persistent multi-agent bridge) is a later option.
+
 **Open:**
 - MCP doesn't have a great story for *server-pushed* notifications to all
-  clients yet — confirm whether to use MCP `notifications/*` channels or a
-  separate subscription tool.
+  clients yet — sidestepped for v1 via the pull-based `wait_for_utterance`.
 - Whether `utterance_available` should fire automatically or whether the agent
   must explicitly `arm()` after a wake event.
 
@@ -299,7 +311,10 @@ Nothing in here yet — created as each phase starts.
       (`wake_detector` + `wake_gate` gating `mic_stream_task`). Bring-up word is
       `okay nabu`; remaining: train + swap in a custom `clawlexa` model (reusable
       trainer so iPinch can mint `okay iPinch`), and write the README docs.
-- [ ] **Phase 5** — MCP server wrapper around the bridge. Wire to iPinch.
+- [~] **Phase 5** — MCP server wrapper around the bridge. Wire to iPinch.
+      **Bridge MCP server done** (`--mcp`, stdio): `wait_for_utterance` + `speak`
+      tools over a shared `Hub`, tested in-memory. Remaining: wire it to iPinch
+      and validate the full agent loop live on the device.
 - [ ] **Phase 6** — Display states + basic touch (push-to-talk, mute,
       cancel).
 - [ ] **Phase 7** — Second-agent integration (ourclaw or Claude Desktop) to
