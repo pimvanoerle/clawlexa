@@ -67,6 +67,7 @@ void app_main(void) {
     if (touch_init(i2c_bus) != ESP_OK) {
         ESP_LOGW(TAG, "touch unavailable; continuing without it");
     }
+    touch_set_tap_callback(ws_on_tap);  /* tap-to-talk (Phase 6) */
 
     /* Phase 1c: audio playback. audio_play_init() always runs (needed for TTS
      * replies); the boot chime is opt-in (CONFIG_CLAWLEXA_BOOT_CHIME) to keep

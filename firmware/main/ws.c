@@ -33,6 +33,17 @@ static esp_websocket_client_handle_t s_client;
 static volatile bool s_connected;
 static volatile int64_t s_mute_until_us;  /* half-duplex: mute mic while we speak */
 static volatile bool s_turn_end;  /* set on play_end: the bridge's reply finished */
+static volatile bool s_tap_pending;  /* set by ws_on_tap() from the touch task */
+
+void ws_on_tap(void) {
+    s_tap_pending = true;
+}
+
+static bool take_tap(void) {
+    bool t = s_tap_pending;
+    s_tap_pending = false;
+    return t;
+}
 
 static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg;
@@ -168,9 +179,14 @@ static void mic_stream_task(void *arg) {
         if (state == WAKE_LISTENING) {
             /* Don't react to our own reply still draining from the speaker. */
             if (mic_gate_muted(s_mute_until_us, now)) {
+                take_tap();  /* ignore a stray tap while our reply plays */
                 continue;
             }
-            if (wake_detector_feed(buf, (size_t) got) && s_connected) {
+            bool woke = wake_detector_feed(buf, (size_t) got);
+            if (take_tap()) {  /* a screen tap is push-to-talk */
+                woke = true;
+            }
+            if (woke && s_connected) {
                 ESP_LOGI(TAG, "wake -> streaming a turn");
                 state = wake_gate_next(state, WAKE_EV_WAKE);
                 s_turn_end = false;
@@ -193,7 +209,7 @@ static void mic_stream_task(void *arg) {
                 ESP_LOGW(TAG, "mic send failed");
             }
         }
-        if (s_turn_end || now > turn_deadline) {
+        if (s_turn_end || now > turn_deadline || take_tap()) {  /* reply done / timeout / tap-cancel */
             ESP_LOGI(TAG, "turn end -> listening");
             const char *end = "{\"type\":\"audio_end\"}";
             esp_websocket_client_send_text(s_client, end, strlen(end), portMAX_DELAY);

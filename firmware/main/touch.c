@@ -20,26 +20,39 @@ static const char *TAG = "touch";
 #define TOUCH_INT_ACTIVE_LEVEL  0  /* CST816 INT is active-low (tp_cfg.levels.interrupt) */
 
 static esp_lcd_touch_handle_t s_touch;
+static void (*s_tap_cb)(void);  /* fired once per press (set by touch_set_tap_callback) */
 
-/* Poll the controller and log taps that land within the round active area.
- * The read is gated on the INT pin: the CST816 NACKs I2C reads while idle
- * (standby), so reading every tick would flood the log with I2C errors — we
- * only read when INT signals a touch. */
+void touch_set_tap_callback(void (*cb)(void)) {
+    s_tap_cb = cb;
+}
+
+/* Poll the controller and fire the tap callback on each new press inside the
+ * round active area. The read is gated on the INT pin (the CST816 NACKs I2C
+ * reads while idle, which would flood the log); a rising edge (no-touch ->
+ * touch) debounces a held finger down to a single tap. */
 static void touch_task(void *arg) {
     (void)arg;
+    bool was_touching = false;
     while (1) {
+        bool touching = false;
         if (touch_int_active(gpio_get_level(BOARD_TOUCH_INT_GPIO),
                              TOUCH_INT_ACTIVE_LEVEL)) {
             esp_lcd_touch_point_data_t point = {0};
             uint8_t count = 0;
             esp_lcd_touch_read_data(s_touch);
-            if (esp_lcd_touch_get_data(s_touch, &point, &count, 1) == ESP_OK && count > 0) {
-                if (touch_in_circle((int16_t)point.x, (int16_t)point.y, PANEL_CENTER,
-                                    PANEL_CENTER, PANEL_RADIUS)) {
-                    ESP_LOGI(TAG, "(%u, %u)", point.x, point.y);
+            if (esp_lcd_touch_get_data(s_touch, &point, &count, 1) == ESP_OK && count > 0 &&
+                touch_in_circle((int16_t)point.x, (int16_t)point.y, PANEL_CENTER,
+                                PANEL_CENTER, PANEL_RADIUS)) {
+                touching = true;
+                if (!was_touching) {  /* rising edge = one tap */
+                    ESP_LOGI(TAG, "tap (%u, %u)", point.x, point.y);
+                    if (s_tap_cb != NULL) {
+                        s_tap_cb();
+                    }
                 }
             }
         }
+        was_touching = touching;
         vTaskDelay(pdMS_TO_TICKS(TOUCH_POLL_MS));
     }
 }
