@@ -104,28 +104,33 @@ it spawns the bridge and runs exactly this loop with a toy responder. Swap its
 For a real always-on agent, use **[`bridge/tools/voice_agent.py`](../bridge/tools/voice_agent.py)**
 instead of the demo. It spawns the bridge as its *private* MCP server (so voice
 stays isolated from your other surfaces), owns the loop, drives the mood crab
-(`set_state`), and routes each utterance through a **brain** — by default headless
-`claude -p` run in a directory you choose, so it answers with that project's
-persona/context:
+(`set_state`), and routes each utterance through a **brain** — by default a *warm*
+[Claude Agent SDK](https://pypi.org/project/claude-agent-sdk/) session run in a
+directory you choose, so it answers with that project's persona/context:
 
 ```bash
+pip install claude-agent-sdk      # the default brain; needs a Claude Code CLI >= 2.0 too
 .venv/bin/python tools/voice_agent.py \
-  --brain-cmd /path/to/claude \
   --brain-cwd /path/to/your/agent-vault \      # its CLAUDE.md / memory load from here
-  --idle-timeout 150 \
+  --claude-cli /path/to/claude \               # CLI the SDK drives (omit to use PATH)
+  --idle-timeout 1800 \
   --memory-prompt "The voice chat paused. Save a short note to memory/{date}_voice_session.md and append a line to memory/channel_voice.md. Reply: ok"
 ```
 
-**Memory — so the crab remembers:**
-- *Within a conversation:* the Claude brain keeps a session and `--resume`s it each
-  turn, so it remembers earlier turns.
-- *Across conversations:* after `--idle-timeout` seconds of silence, one final
-  `--resume` turn runs your `--memory-prompt` (with write tools enabled) so the
-  brain persists a session note — mirroring how a chat agent saves memory. `{date}`
-  expands to `YYYY_MM_DD`. Omit `--memory-prompt` to disable.
+**Memory + speed — so the crab remembers, and follow-ups feel instant:**
+- *Within a conversation:* the brain keeps **one warm Claude session** across turns,
+  so it remembers earlier turns and only the first turn pays cold-start latency —
+  later turns are ~1s instead of ~5s.
+- *Across conversations:* after `--idle-timeout` seconds of silence the warm session
+  is closed; if a `--memory-prompt` is set, one final turn first asks the brain to
+  persist a session note — mirroring how a chat agent saves memory. `{date}` expands
+  to `YYYY_MM_DD`. Omit `--memory-prompt` to disable. (`--idle-timeout 1800` keeps the
+  session warm ~30 min after the last word; `<=0` keeps it open forever.)
 
-The brain just needs its model auth in the environment (e.g. `ANTHROPIC_API_KEY`)
-and, for the `claude` CLI specifically, `node` on `PATH`.
+The brain just needs its model auth in the environment (e.g. `ANTHROPIC_API_KEY`),
+and `node` on `PATH` for the Claude Code CLI. The SDK requires CLI **>= 2.0** — if
+your agent pins an older CLI for its own use, install a separate current one and
+point `--claude-cli` at it (leaves the agent's CLI untouched).
 
 ### Run it on boot (macOS LaunchAgent)
 

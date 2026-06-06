@@ -7,6 +7,9 @@ dependencies = ["websockets>=12,<14", "faster-whisper>=1.0", "piper-tts>=1.4", "
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# For tools/voice_agent.py's default warm-session brain (also needs a Claude Code
+# CLI >= 2.0 on PATH or via --claude-cli). Optional: the bridge core never imports it.
+voice = ["claude-agent-sdk>=0.2"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
