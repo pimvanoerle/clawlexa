@@ -55,13 +55,19 @@ async def main() -> None:
             print(f"[demo] connected; tools: {[t.name for t in tools.tools]}", file=sys.stderr)
             print("[demo] say your wake word then talk; Ctrl-C to quit", file=sys.stderr)
             while True:
+                # Drive the device's ambient status display around the turn.
+                await session.call_tool("set_state", {"state": "listening"})
                 text = _text(await session.call_tool("wait_for_utterance", {}))
                 if not text:
+                    await session.call_tool("set_state", {"state": "idle"})
                     continue
                 print(f"[demo] heard: {text!r}", file=sys.stderr)
+                await session.call_tool("set_state", {"state": "thinking"})
                 reply = demo_reply(text)  # a real agent's LLM goes here
                 print(f"[demo] reply: {reply!r}", file=sys.stderr)
+                await session.call_tool("set_state", {"state": "speaking"})
                 await session.call_tool("speak", {"text": reply})
+                await session.call_tool("set_state", {"state": "idle"})
 
 
 if __name__ == "__main__":
