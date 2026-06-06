@@ -95,6 +95,31 @@ typedef struct {
 } gpio_config_t;
 esp_err_t gpio_config(const gpio_config_t *cfg);
 esp_err_t gpio_set_level(gpio_num_t pin, uint32_t level);
+int gpio_get_level(gpio_num_t pin);
+
+/* ---- driver/ledc (PWM backlight) ----------------------------------------- */
+typedef enum { LEDC_LOW_SPEED_MODE = 1 } ledc_mode_t;
+typedef enum { LEDC_TIMER_0 = 0 } ledc_timer_t;
+typedef enum { LEDC_CHANNEL_0 = 0 } ledc_channel_t;
+typedef enum { LEDC_TIMER_8_BIT = 8 } ledc_timer_bit_t;
+typedef enum { LEDC_AUTO_CLK = 0 } ledc_clk_cfg_t;
+typedef struct {
+    ledc_mode_t speed_mode;
+    ledc_timer_t timer_num;
+    ledc_timer_bit_t duty_resolution;
+    uint32_t freq_hz;
+    ledc_clk_cfg_t clk_cfg;
+} ledc_timer_config_t;
+typedef struct {
+    int gpio_num;
+    ledc_mode_t speed_mode;
+    ledc_channel_t channel;
+    ledc_timer_t timer_sel;
+    uint32_t duty;
+    int hpoint;
+} ledc_channel_config_t;
+esp_err_t ledc_timer_config(const ledc_timer_config_t *cfg);
+esp_err_t ledc_channel_config(const ledc_channel_config_t *cfg);
 
 /* ---- esp_heap_caps -------------------------------------------------------- */
 #define MALLOC_CAP_DMA (1 << 3)

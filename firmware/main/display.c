@@ -21,7 +21,13 @@
 
 #include "board.h"
 
+#include <string.h>
+
 static const char *TAG = "display";
+
+/* The single centered label — "hello" at boot, then driven by the agent via
+ * display_set_state() / display_show() (Phase 6). */
+static lv_obj_t *s_label;
 
 #define LCD_HOST            SPI2_HOST
 #define LCD_BITS_PER_PIXEL  16
@@ -224,13 +230,42 @@ static esp_err_t init_lvgl_and_hello(esp_lcd_panel_io_handle_t io_handle,
          * color fill is perfectly clean), so not worth chasing in firmware. */
         lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
 
-        lv_obj_t *label = lv_label_create(scr);
-        lv_label_set_text(label, "hello");
-        lv_obj_set_style_text_color(label, lv_color_white(), 0);
-        lv_obj_center(label);
+        s_label = lv_label_create(scr);
+        lv_label_set_text(s_label, "hello");
+        lv_obj_set_style_text_color(s_label, lv_color_white(), 0);
+        lv_obj_center(s_label);
         lvgl_port_unlock();
     }
     return ESP_OK;
+}
+
+/* Per-state color for the ambient status word. */
+static lv_color_t state_color(const char *state) {
+    if (strcmp(state, "listening") == 0) return lv_color_hex(0x2196F3);  /* blue */
+    if (strcmp(state, "thinking") == 0) return lv_color_hex(0xFFC107);   /* amber */
+    if (strcmp(state, "speaking") == 0) return lv_color_hex(0x4CAF50);   /* green */
+    if (strcmp(state, "error") == 0) return lv_color_hex(0xF44336);      /* red */
+    return lv_color_white();  /* idle / unknown */
+}
+
+void display_set_state(const char *state) {
+    if (s_label == NULL) return;
+    if (lvgl_port_lock(0)) {
+        lv_label_set_text(s_label, state);
+        lv_obj_set_style_text_color(s_label, state_color(state), 0);
+        lv_obj_center(s_label);
+        lvgl_port_unlock();
+    }
+}
+
+void display_show(const char *text) {
+    if (s_label == NULL) return;
+    if (lvgl_port_lock(0)) {
+        lv_label_set_text(s_label, text);
+        lv_obj_set_style_text_color(s_label, lv_color_white(), 0);
+        lv_obj_center(s_label);
+        lvgl_port_unlock();
+    }
 }
 
 esp_err_t display_init(i2c_master_bus_handle_t *out_i2c_bus) {

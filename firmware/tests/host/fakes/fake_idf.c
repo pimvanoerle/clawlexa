@@ -96,6 +96,8 @@ esp_err_t gpio_set_level(gpio_num_t pin, uint32_t level) {
     return ESP_OK;
 }
 
+int gpio_get_level(gpio_num_t pin) { (void)pin; return 0; }
+
 void *heap_caps_calloc(size_t n, size_t size, uint32_t caps) {
     (void)caps;
     faked_record("heap_caps_calloc");
@@ -245,3 +247,6 @@ void lv_obj_center(lv_obj_t *o) { (void)o; }
 lv_color_t lv_color_black(void) { lv_color_t c = {0}; return c; }
 lv_color_t lv_color_white(void) { lv_color_t c = {0xFFFFFF}; return c; }
 lv_color_t lv_color_hex(uint32_t v) { lv_color_t c = {v}; return c; }
+
+esp_err_t ledc_timer_config(const ledc_timer_config_t *cfg) { (void)cfg; return ESP_OK; }
+esp_err_t ledc_channel_config(const ledc_channel_config_t *cfg) { (void)cfg; return ESP_OK; }

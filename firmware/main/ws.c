@@ -14,6 +14,7 @@
 
 #include "app_version.h"
 #include "audio.h"
+#include "display.h"
 #include "mic.h"
 #include "mic_gate.h"
 #include "wake_detector.h"
@@ -68,6 +69,37 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data
             /* play_end means the reply finished — close the wake-triggered turn. */
             if (strstr(ctrl, "play_end") != NULL) {
                 s_turn_end = true;
+            }
+            /* Agent-driven display (Phase 6): set_state -> status word/color,
+             * show -> arbitrary line. (ctrl is the frame truncated to 95 bytes;
+             * long show text is clipped — fine for the small round screen.) */
+            if (strstr(ctrl, "\"set_state\"") != NULL) {
+                static const char *const states[] = {"idle", "listening",
+                                                     "thinking", "speaking", "error"};
+                for (size_t i = 0; i < sizeof(states) / sizeof(states[0]); i++) {
+                    char needle[16];
+                    snprintf(needle, sizeof(needle), "\"%s\"", states[i]);
+                    if (strstr(ctrl, needle) != NULL) {
+                        display_set_state(states[i]);
+                        break;
+                    }
+                }
+            } else if (strstr(ctrl, "\"show\"") != NULL) {
+                const char *t = strstr(ctrl, "\"text\"");
+                if (t != NULL && (t = strchr(t + 6, '"')) != NULL) {
+                    t++;  /* opening quote of the value */
+                    const char *end = strchr(t, '"');
+                    if (end != NULL) {
+                        char msg[80];
+                        int len = (int)(end - t);
+                        if (len > (int)sizeof(msg) - 1) {
+                            len = (int)sizeof(msg) - 1;
+                        }
+                        memcpy(msg, t, (size_t)len);
+                        msg[len] = '\0';
+                        display_show(msg);
+                    }
+                }
             }
         } else if ((e->op_code == WS_BIN_OPCODE || e->op_code == WS_CONT_OPCODE) &&
                    e->data_len >= 2) {
