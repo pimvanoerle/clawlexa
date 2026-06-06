@@ -23,7 +23,7 @@ def test_client_lists_the_tools():
             tools = await client.list_tools()
             return sorted(t.name for t in tools.tools)
 
-    assert asyncio.run(run()) == ["speak", "wait_for_utterance"]
+    assert asyncio.run(run()) == ["set_state", "show", "speak", "wait_for_utterance"]
 
 
 def test_wait_for_utterance_round_trip():

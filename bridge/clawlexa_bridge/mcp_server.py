@@ -45,6 +45,19 @@ def build_mcp(hub: Hub) -> FastMCP:
         await hub.speak(text)
         return "ok"
 
+    @mcp.tool()
+    async def set_state(state: str) -> str:
+        """Set the device's ambient status indicator. One of:
+        idle | listening | thinking | speaking | error."""
+        await hub.set_state(state)
+        return "ok"
+
+    @mcp.tool()
+    async def show(text: str) -> str:
+        """Show a short line of text on the device's screen."""
+        await hub.show(text)
+        return "ok"
+
     return mcp
 
 

@@ -3,10 +3,20 @@
 No MCP transport, no real device: the agent loop is exercised directly.
 """
 import asyncio
+import json
 import os
 
 from clawlexa_bridge.hub import Hub
 from clawlexa_bridge.tts import FakeTTS
+
+
+class FakeWS:
+    """A device connection that just records the control frames it's sent."""
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, frame):
+        self.sent.append(frame)
 
 
 def test_submit_then_next_returns_transcript():
@@ -68,3 +78,39 @@ def test_detach_only_clears_matching_ws():
     assert hub.device_connected
     hub.detach("WS")
     assert not hub.device_connected
+
+
+def test_set_state_sends_frame_to_device():
+    ws = FakeWS()
+
+    async def run():
+        hub = Hub(FakeTTS(), send_wav=None)
+        hub.attach(ws)
+        await hub.set_state("listening")
+
+    asyncio.run(run())
+    assert json.loads(ws.sent[0]) == {"type": "set_state", "state": "listening"}
+
+
+def test_show_sends_frame_to_device():
+    ws = FakeWS()
+
+    async def run():
+        hub = Hub(FakeTTS(), send_wav=None)
+        hub.attach(ws)
+        await hub.show("on my way")
+
+    asyncio.run(run())
+    assert json.loads(ws.sent[0]) == {"type": "show", "text": "on my way"}
+
+
+def test_set_state_without_device_raises():
+    async def run():
+        hub = Hub(FakeTTS(), send_wav=None)
+        try:
+            await hub.set_state("idle")
+            return "no-error"
+        except RuntimeError:
+            return "raised"
+
+    assert asyncio.run(run()) == "raised"

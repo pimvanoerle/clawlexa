@@ -38,6 +38,23 @@ def play_end_message() -> str:
     return json.dumps({"type": "play_end"})
 
 
+# The device's ambient status indicator (SPEC §8). Agent-driven via set_state.
+DISPLAY_STATES = ("idle", "listening", "thinking", "speaking", "error")
+
+
+def set_state_message(state: str) -> str:
+    """Tell the device which ambient status to show. Raises ValueError on an
+    unknown state so a bad agent call fails loudly rather than silently."""
+    if state not in DISPLAY_STATES:
+        raise ValueError(f"unknown display state {state!r}; expected one of {DISPLAY_STATES}")
+    return json.dumps({"type": "set_state", "state": state})
+
+
+def show_message(text: str) -> str:
+    """Push a short line of text to the device's screen."""
+    return json.dumps({"type": "show", "text": text})
+
+
 def parse_message(raw: str) -> dict[str, Any]:
     """Parse a JSON control frame into a dict.
 

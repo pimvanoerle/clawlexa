@@ -11,6 +11,7 @@ import asyncio
 import logging
 from typing import Awaitable, Callable
 
+from .protocol import set_state_message, show_message
 from .tts import TTS
 
 log = logging.getLogger("clawlexa.bridge")
@@ -49,9 +50,22 @@ class Hub:
 
     async def speak(self, text: str) -> None:
         """Synthesize `text` and play it on the device."""
-        ws = self._ws
-        if ws is None:
-            raise RuntimeError("no device connected")
+        ws = self._require_ws()
         wav = await asyncio.to_thread(self._tts.synthesize, text)
         await self._send_wav(ws, wav)
         log.info('spoke: "%s"', text)
+
+    async def set_state(self, state: str) -> None:
+        """Set the device's ambient status indicator (SPEC §8)."""
+        await self._require_ws().send(set_state_message(state))  # raises ValueError on bad state
+        log.info("set_state: %s", state)
+
+    async def show(self, text: str) -> None:
+        """Push a short line of text to the device's screen."""
+        await self._require_ws().send(show_message(text))
+        log.info('show: "%s"', text)
+
+    def _require_ws(self):
+        if self._ws is None:
+            raise RuntimeError("no device connected")
+        return self._ws

@@ -33,6 +33,24 @@ def test_play_end():
     assert json.loads(play_end_message())["type"] == "play_end"
 
 
+def test_set_state_message_valid():
+    from clawlexa_bridge.protocol import set_state_message
+    msg = json.loads(set_state_message("listening"))
+    assert msg["type"] == "set_state" and msg["state"] == "listening"
+
+
+def test_set_state_message_rejects_unknown_state():
+    from clawlexa_bridge.protocol import set_state_message
+    with pytest.raises(ValueError):
+        set_state_message("dancing")
+
+
+def test_show_message_carries_text():
+    from clawlexa_bridge.protocol import show_message
+    msg = json.loads(show_message("hi there"))
+    assert msg["type"] == "show" and msg["text"] == "hi there"
+
+
 def test_parse_valid_hello():
     msg = parse_message('{"type": "hello", "device": "clawlexa"}')
     assert msg["type"] == "hello"
