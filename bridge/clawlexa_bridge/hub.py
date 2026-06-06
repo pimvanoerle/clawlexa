@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import wave
 from typing import Awaitable, Callable
 
 from .protocol import set_state_message, show_message
@@ -49,10 +50,15 @@ class Hub:
         return await self._utterances.get()
 
     async def speak(self, text: str) -> None:
-        """Synthesize `text` and play it on the device."""
+        """Synthesize `text`, play it on the device, and return once it has
+        ~finished playing — so the agent stays 'speaking' for the whole clip and
+        doesn't re-listen over its own voice (half-duplex)."""
         ws = self._require_ws()
         wav = await asyncio.to_thread(self._tts.synthesize, text)
         await self._send_wav(ws, wav)
+        with wave.open(wav, "rb") as w:
+            play_s = w.getnframes() / w.getframerate()
+        await asyncio.sleep(play_s)
         log.info('spoke: "%s"', text)
 
     async def set_state(self, state: str) -> None:

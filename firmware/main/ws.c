@@ -193,6 +193,7 @@ static void mic_stream_task(void *arg) {
                 const char *begin =
                     "{\"type\":\"audio_begin\",\"rate\":16000,\"channels\":1,\"bits\":16}";
                 esp_websocket_client_send_text(s_client, begin, strlen(begin), portMAX_DELAY);
+                display_set_state("listening");  /* acknowledge the wake/tap immediately */
                 turn_deadline = now + WAKE_TURN_TIMEOUT_US;
             }
             continue;
@@ -209,11 +210,18 @@ static void mic_stream_task(void *arg) {
                 ESP_LOGW(TAG, "mic send failed");
             }
         }
-        if (s_turn_end || now > turn_deadline || take_tap()) {  /* reply done / timeout / tap-cancel */
+        bool reply_done = s_turn_end;     /* turn finished because the reply played */
+        bool tapped = take_tap();          /* evaluated once so the flag is always cleared */
+        if (reply_done || now > turn_deadline || tapped) {
             ESP_LOGI(TAG, "turn end -> listening");
             const char *end = "{\"type\":\"audio_end\"}";
             esp_websocket_client_send_text(s_client, end, strlen(end), portMAX_DELAY);
             state = wake_gate_next(state, WAKE_EV_TURN_END);
+            if (!reply_done) {
+                /* No reply came (timeout / tap-cancel) — clear the listening
+                 * crab. On a reply the agent already drove speaking->idle. */
+                display_set_state("idle");
+            }
         }
     }
 }

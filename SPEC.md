@@ -318,14 +318,12 @@ Nothing in here yet — created as each phase starts.
       back. Build-time integration tests cover the protocol path. Remaining: wire
       the real iPinch (swap `demo_reply` for its LLM); minor: wake word can bleed
       into the transcript.
-- [~] **Phase 6** — Display states + basic touch (push-to-talk, mute,
-      cancel). **Display states done + a crab per mood:** `set_state`/`show` MCP
-      tools → device control frames → LVGL per-state color + an ASCII crab face
-      (sleeping/attentive/pondering/happy/x-eyes), driven by the agent around a
-      turn. **Touch FIXED** (the CST816 just needed its EXIO0/1 reset pulsed at
-      boot) — taps register, no idle flood. Remaining: wire touch into actions
-      (push-to-talk / mute / cancel) + optional bitmap crab icons (ASCII stays
-      the no-asset fallback).
+- [x] **Phase 6** — Display states + basic touch. **Done + verified on device:**
+      `set_state`/`show` MCP tools → LVGL per-state color + an ASCII crab face per
+      mood (sleeping/attentive/pondering/happy/x-eyes), agent-driven. Touch fixed
+      (CST816 EXIO0/1 reset) and wired: **tap-to-talk** (a tap opens a turn like
+      the wake word) + tap-to-cancel, debounced. Optional follow-ups: bitmap crab
+      icons (ASCII is the no-asset fallback) and a mute gesture.
 - [ ] **Phase 7** — Second-agent integration (ourclaw or Claude Desktop) to
       prove the MCP boundary is real.
 - [ ] **Phase 8+** — Stretch: barge-in, on-screen content from agent, IMU
