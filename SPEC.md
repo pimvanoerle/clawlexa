@@ -323,7 +323,10 @@ Nothing in here yet — created as each phase starts.
       mood (sleeping/attentive/pondering/happy/x-eyes), agent-driven. Touch fixed
       (CST816 EXIO0/1 reset) and wired: **tap-to-talk** (a tap opens a turn like
       the wake word) + tap-to-cancel, debounced. Optional follow-ups: bitmap crab
-      icons (ASCII is the no-asset fallback) and a mute gesture.
+      icons (ASCII is the no-asset fallback); a mute gesture; and a small tap
+      dead-zone right after a reply — taps are dropped during the half-duplex
+      mute tail (~300 ms past playback); fix is to queue the tap (don't clear the
+      flag while muted) so it fires when the mute clears.
 - [ ] **Phase 7** — Second-agent integration (ourclaw or Claude Desktop) to
       prove the MCP boundary is real.
 - [ ] **Phase 8+** — Stretch: barge-in, on-screen content from agent, IMU
