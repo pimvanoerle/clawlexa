@@ -1,0 +1,70 @@
+"""Unit tests for the Hub — the device-link <-> MCP-agent bridge (Phase 5).
+
+No MCP transport, no real device: the agent loop is exercised directly.
+"""
+import asyncio
+import os
+
+from clawlexa_bridge.hub import Hub
+from clawlexa_bridge.tts import FakeTTS
+
+
+def test_submit_then_next_returns_transcript():
+    async def run():
+        hub = Hub(FakeTTS(), send_wav=None)
+        await hub.submit_utterance("hello world")
+        return await hub.next_utterance(timeout=1)
+
+    assert asyncio.run(run()) == "hello world"
+
+
+def test_next_utterance_times_out():
+    async def run():
+        hub = Hub(FakeTTS(), send_wav=None)
+        try:
+            await hub.next_utterance(timeout=0.05)
+            return "no-timeout"
+        except asyncio.TimeoutError:
+            return "timeout"
+
+    assert asyncio.run(run()) == "timeout"
+
+
+def test_speak_without_device_raises():
+    async def run():
+        hub = Hub(FakeTTS(), send_wav=None)
+        try:
+            await hub.speak("hi")
+            return "no-error"
+        except RuntimeError:
+            return "raised"
+
+    assert asyncio.run(run()) == "raised"
+
+
+def test_speak_synthesizes_and_sends_to_device():
+    sent = []
+
+    async def fake_send(ws, path):
+        sent.append((ws, path))
+
+    async def run():
+        hub = Hub(FakeTTS(), send_wav=fake_send)
+        hub.attach("WS")
+        assert hub.device_connected
+        await hub.speak("it is sunny")
+
+    asyncio.run(run())
+    assert len(sent) == 1
+    assert sent[0][0] == "WS"
+    assert sent[0][1].endswith(".wav") and os.path.exists(sent[0][1])
+
+
+def test_detach_only_clears_matching_ws():
+    hub = Hub(FakeTTS(), send_wav=None)
+    hub.attach("WS")
+    assert hub.device_connected
+    hub.detach("OTHER")          # a different (stale) connection — no-op
+    assert hub.device_connected
+    hub.detach("WS")
+    assert not hub.device_connected

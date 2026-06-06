@@ -3,7 +3,7 @@ name = "clawlexa-bridge"
 version = "0.1.0"
 description = "Host-side bridge between the clawlexa ESP32 device and an MCP agent."
 requires-python = ">=3.10"
-dependencies = ["websockets>=12,<14", "faster-whisper>=1.0", "piper-tts>=1.4"]
+dependencies = ["websockets>=12,<14", "faster-whisper>=1.0", "piper-tts>=1.4", "mcp>=1.2"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

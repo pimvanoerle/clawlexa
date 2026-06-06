@@ -44,11 +44,13 @@ async def send_wav(ws, path: str) -> None:
 
 
 async def _handle_utterance(ws, pcm: bytes, rate: int,
-                            stt: STT | None, tts: TTS | None) -> bool:
-    """Save one VAD-segmented utterance, transcribe it, and speak the reply.
+                            stt: STT | None, tts: TTS | None, hub=None) -> bool:
+    """Save one VAD-segmented utterance, transcribe it, and dispatch it.
 
-    Returns True if a spoken reply was sent (so the caller can apply half-duplex
-    backoff). STT/TTS are blocking — kept off the event loop with to_thread.
+    With a `hub` (MCP mode), the transcript goes to the agent, which replies via
+    the `speak` tool — returns False (no immediate reply). Standalone, it echoes
+    "You said: X" and returns True so the caller can apply half-duplex backoff.
+    STT/TTS are blocking — kept off the event loop with to_thread.
     """
     rec = AudioRecorder()
     rec.begin(rate, 1, 16)
@@ -62,7 +64,10 @@ async def _handle_utterance(ws, pcm: bytes, rate: int,
         log.info("utterance had no speech; skipping")
         return False
     log.info('you said: "%s"', text)
-    if tts is not None:
+    if hub is not None:  # MCP mode: hand the transcript to the agent
+        await hub.submit_utterance(text)
+        return False
+    if tts is not None:  # standalone loopback
         wav = await asyncio.to_thread(tts.synthesize, reply_text(text))
         await send_wav(ws, wav)
         return True
@@ -72,9 +77,12 @@ async def _handle_utterance(ws, pcm: bytes, rate: int,
 async def handle_connection(ws: websockets.WebSocketServerProtocol,
                             stt: STT | None = None,
                             tts: TTS | None = None,
-                            endpointer_factory=None) -> None:
+                            endpointer_factory=None,
+                            hub=None) -> None:
     peer = ws.remote_address
     log.info("device connected from %s", peer)
+    if hub is not None:
+        hub.attach(ws)
     make_ep = endpointer_factory or (lambda rate: Endpointer(rate=rate))
     ep: Endpointer | None = None  # set between audio_begin and audio_end
     rate = 16000
@@ -86,7 +94,7 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol,
                 if ep is None:
                     continue  # stray audio before audio_begin
                 for utt in ep.feed(message):
-                    spoke = await _handle_utterance(ws, utt, rate, stt, tts)
+                    spoke = await _handle_utterance(ws, utt, rate, stt, tts, hub)
                     if spoke:
                         # Half-duplex: we just played a reply. Reset the
                         # endpointer so any of our own audio the mic caught
@@ -111,7 +119,7 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol,
                 if ep is not None:
                     utt = ep.flush()
                     if utt:
-                        await _handle_utterance(ws, utt, rate, stt, tts)
+                        await _handle_utterance(ws, utt, rate, stt, tts, hub)
                     ep = None
                 log.info("stream closed")
             else:
@@ -122,13 +130,15 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol,
         if ep is not None:  # device dropped mid-stream — keep the last utterance
             utt = ep.flush()
             if utt:
-                await _handle_utterance(ws, utt, rate, stt, tts)
+                await _handle_utterance(ws, utt, rate, stt, tts, hub)
+        if hub is not None:
+            hub.detach(ws)
         log.info("device disconnected from %s", peer)
 
 
 async def serve(host: str, port: int, stt: STT | None = None,
                 tts: TTS | None = None, vad_threshold: float | None = None,
-                vad_end_silence_ms: int | None = None) -> None:
+                vad_end_silence_ms: int | None = None, hub=None) -> None:
     if stt is None:
         log.info("loading STT model (faster-whisper)...")
         stt = WhisperSTT()
@@ -141,7 +151,7 @@ async def serve(host: str, port: int, stt: STT | None = None,
         ep_kwargs["threshold"] = vad_threshold
     if vad_end_silence_ms is not None:
         ep_kwargs["end_silence_ms"] = vad_end_silence_ms
-    handler = functools.partial(handle_connection, stt=stt, tts=tts,
+    handler = functools.partial(handle_connection, stt=stt, tts=tts, hub=hub,
                                 endpointer_factory=lambda rate: Endpointer(rate=rate, **ep_kwargs))
     log.info("clawlexa-bridge listening on ws://%s:%d", host, port)
     async with websockets.serve(handler, host, port):

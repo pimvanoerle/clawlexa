@@ -198,3 +198,32 @@ def test_empty_transcript_is_skipped(tmp_path, monkeypatch):
 
     asyncio.run(run())
     assert fake_tts.calls == []  # no reply synthesized for empty speech
+
+
+def test_mcp_mode_routes_utterance_to_hub(tmp_path, monkeypatch):
+    """With a hub (MCP mode), the transcript goes to the agent — no echo reply."""
+    monkeypatch.chdir(tmp_path)
+    from clawlexa_bridge.hub import Hub
+    fake_stt = FakeSTT("turn on the lights")
+    sent = []
+
+    async def fake_send(ws, path):
+        sent.append(path)
+
+    hub = Hub(FakeTTS(), send_wav=fake_send)
+
+    async def run():
+        handler = functools.partial(server.handle_connection, stt=fake_stt,
+                                    hub=hub, endpointer_factory=fast_ep)
+        async with websockets.serve(handler, "127.0.0.1", 0) as srv:
+            port = srv.sockets[0].getsockname()[1]
+            async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"type": "audio_begin", "rate": 16000,
+                                          "channels": 1, "bits": 16}))
+                await ws.send(voiced(4))
+                await ws.send(json.dumps({"type": "audio_end"}))
+                return await hub.next_utterance(timeout=2)
+
+    text = asyncio.run(run())
+    assert text == "turn on the lights"  # handed to the agent
+    assert sent == []  # MCP mode: no auto-reply pushed to the device
