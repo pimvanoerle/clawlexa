@@ -26,9 +26,12 @@ void test_touch_init_sequence_and_config(void) {
 
     TEST_ASSERT_EQUAL(ESP_OK, touch_init(bus));
 
-    /* I2C panel IO created, then the CST816 controller, then the poll task. */
+    /* I2C panel IO created, then the CST816 controller, then the INT callback is
+     * registered, then the poll task — the INT is armed before the task starts so
+     * no first-touch edge is lost. */
     assert_order("panel_io_i2c_new", "cst816s_new");
-    assert_order("cst816s_new", "xTaskCreate");
+    assert_order("cst816s_new", "touch_register_isr");
+    assert_order("touch_register_isr", "xTaskCreate");
 
     /* Touch config wired to the board: INT on the known GPIO, reset left to the
      * shared expander (-1), bounds set to the panel width. */

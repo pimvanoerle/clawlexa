@@ -14,6 +14,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+/* ---- attributes (esp_attr.h) ---------------------------------------------- */
+#define IRAM_ATTR
+
 /* ---- esp_err -------------------------------------------------------------- */
 typedef int esp_err_t;
 #define ESP_OK          0
@@ -55,6 +58,17 @@ typedef void (*TaskFunction_t)(void *);
  * exercise init wiring, not the polling loop. */
 BaseType_t xTaskCreate(TaskFunction_t fn, const char *name, uint32_t stack,
                        void *arg, unsigned int prio, TaskHandle_t *out);
+
+/* semaphores (touch INT signalling) — the host never runs the poll task, so the
+ * stubs just satisfy the compile/link. */
+typedef void *SemaphoreHandle_t;
+#define pdTRUE  1
+#define pdFALSE 0
+#define portMAX_DELAY ((TickType_t)0xffffffffU)
+#define portYIELD_FROM_ISR(x) do { (void)(x); } while (0)
+SemaphoreHandle_t xSemaphoreCreateBinary(void);
+BaseType_t xSemaphoreTake(SemaphoreHandle_t sem, TickType_t ticks);
+BaseType_t xSemaphoreGiveFromISR(SemaphoreHandle_t sem, BaseType_t *woken);
 
 /* ---- driver/i2c_master ---------------------------------------------------- */
 typedef struct fake_i2c_bus *i2c_master_bus_handle_t;
@@ -222,6 +236,9 @@ esp_err_t esp_lcd_touch_read_data(esp_lcd_touch_handle_t tp);
 esp_err_t esp_lcd_touch_get_data(esp_lcd_touch_handle_t tp,
                                  esp_lcd_touch_point_data_t *data,
                                  uint8_t *cnt, uint8_t max_cnt);
+typedef void (*esp_lcd_touch_interrupt_callback_t)(esp_lcd_touch_handle_t tp);
+esp_err_t esp_lcd_touch_register_interrupt_callback(esp_lcd_touch_handle_t tp,
+                                                    esp_lcd_touch_interrupt_callback_t cb);
 
 #define ESP_LCD_TOUCH_IO_I2C_CST816S_ADDRESS 0x15
 #define ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG() { \

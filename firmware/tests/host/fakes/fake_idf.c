@@ -69,6 +69,23 @@ BaseType_t xTaskCreate(TaskFunction_t fn, const char *name, uint32_t stack,
     return pdPASS;  /* deliberately do not run fn (no polling loop in tests) */
 }
 
+static int s_sem;
+SemaphoreHandle_t xSemaphoreCreateBinary(void) {
+    faked_record("sem_create");
+    return (SemaphoreHandle_t)&s_sem;
+}
+BaseType_t xSemaphoreTake(SemaphoreHandle_t sem, TickType_t ticks) {
+    (void)sem; (void)ticks;
+    return pdFALSE;  /* host never runs the poll loop */
+}
+BaseType_t xSemaphoreGiveFromISR(SemaphoreHandle_t sem, BaseType_t *woken) {
+    (void)sem;
+    if (woken) {
+        *woken = pdFALSE;
+    }
+    return pdTRUE;
+}
+
 esp_err_t i2c_new_master_bus(const i2c_master_bus_config_t *cfg,
                              i2c_master_bus_handle_t *ret) {
     (void)cfg;
@@ -188,6 +205,13 @@ esp_err_t esp_lcd_touch_new_i2c_cst816s(esp_lcd_panel_io_handle_t io,
 
 esp_err_t esp_lcd_touch_read_data(esp_lcd_touch_handle_t tp) {
     (void)tp;
+    return ESP_OK;
+}
+
+esp_err_t esp_lcd_touch_register_interrupt_callback(esp_lcd_touch_handle_t tp,
+                                                    esp_lcd_touch_interrupt_callback_t cb) {
+    (void)tp; (void)cb;
+    faked_record("touch_register_isr");
     return ESP_OK;
 }
 
