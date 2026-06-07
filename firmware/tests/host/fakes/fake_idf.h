@@ -282,6 +282,15 @@ lv_color_t lv_color_black(void);
 lv_color_t lv_color_white(void);
 lv_color_t lv_color_hex(uint32_t c);
 
+/* images + obj flags (per-state crab bitmaps) */
+typedef struct { uint32_t header; const void *data; uint32_t data_size; } lv_image_dsc_t;
+typedef int lv_obj_flag_t;
+#define LV_OBJ_FLAG_HIDDEN ((lv_obj_flag_t)1)
+lv_obj_t *lv_image_create(lv_obj_t *parent);
+void lv_image_set_src(lv_obj_t *img, const void *src);
+void lv_obj_add_flag(lv_obj_t *obj, lv_obj_flag_t f);
+void lv_obj_remove_flag(lv_obj_t *obj, lv_obj_flag_t f);
+
 /* ---- esp_lvgl_port -------------------------------------------------------- */
 typedef struct {
     int task_priority, task_stack, task_affinity, task_max_sleep_ms;

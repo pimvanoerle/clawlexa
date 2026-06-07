@@ -20,6 +20,7 @@
 #include "lvgl.h"
 
 #include "board.h"
+#include "crab_icons.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -31,6 +32,7 @@ static const char *TAG = "display";
  * whole background the state color (ambient indicator); the label rides on top. */
 static lv_obj_t *s_screen;
 static lv_obj_t *s_label;
+static lv_obj_t *s_icon;   /* per-state crab bitmap, centered over the colour ring */
 
 #define LCD_HOST            SPI2_HOST
 #define LCD_BITS_PER_PIXEL  16
@@ -246,6 +248,12 @@ static esp_err_t init_lvgl_and_hello(esp_lcd_panel_io_handle_t io_handle,
         lv_label_set_text(s_label, "hello");
         lv_obj_set_style_text_color(s_label, lv_color_white(), 0);
         lv_obj_center(s_label);
+
+        /* The per-state crab bitmap rides centered on top; hidden until the
+         * first set_state so the boot "hello" shows. */
+        s_icon = lv_image_create(scr);
+        lv_obj_center(s_icon);
+        lv_obj_add_flag(s_icon, LV_OBJ_FLAG_HIDDEN);
         lvgl_port_unlock();
     }
     return ESP_OK;
@@ -260,19 +268,35 @@ static lv_color_t state_color(const char *state) {
     return lv_color_black();  /* idle / unknown */
 }
 
-/* Paint the whole screen `bg` and show `label` in white centered on top. */
+/* Paint the whole screen `bg` and show `label` in white centered on top (the
+ * crab bitmap, if any, is hidden — this is the text path: boot/show + fallback). */
 static void paint(lv_color_t bg, const char *label) {
     if (s_screen == NULL || s_label == NULL) return;
     if (lvgl_port_lock(0)) {
         lv_obj_set_style_bg_color(s_screen, bg, 0);
+        if (s_icon != NULL) {
+            lv_obj_add_flag(s_icon, LV_OBJ_FLAG_HIDDEN);
+        }
         lv_label_set_text(s_label, label);
         lv_obj_set_style_text_color(s_label, lv_color_white(), 0);
         lv_obj_center(s_label);
+        lv_obj_remove_flag(s_label, LV_OBJ_FLAG_HIDDEN);
         lvgl_port_unlock();
     }
 }
 
-/* A little ASCII crab whose face matches the mood (V = claws, middle = eyes). */
+/* The per-state crab bitmap, or NULL for an unknown state (-> ASCII fallback). */
+static const lv_image_dsc_t *crab_icon(const char *state) {
+    if (strcmp(state, "idle") == 0)      return &crab_idle;
+    if (strcmp(state, "listening") == 0) return &crab_listening;
+    if (strcmp(state, "thinking") == 0)  return &crab_thinking;
+    if (strcmp(state, "speaking") == 0)  return &crab_speaking;
+    if (strcmp(state, "error") == 0)     return &crab_error;
+    return NULL;
+}
+
+/* The original ASCII crab — kept as the fallback when a state has no bitmap
+ * (V = claws, middle = eyes). */
 static const char *crab_face(const char *state) {
     if (strcmp(state, "listening") == 0) return "V (o  o) V";   /* attentive */
     if (strcmp(state, "thinking") == 0)  return "V (o  o) V\n?";  /* pondering */
@@ -282,14 +306,29 @@ static const char *crab_face(const char *state) {
 }
 
 void display_set_state(const char *state) {
-    /* crab on top, the state word underneath; background glows the state color. */
-    char buf[48];
-    snprintf(buf, sizeof(buf), "%s\n\n%s", crab_face(state), state);
-    paint(state_color(state), buf);
+    const lv_image_dsc_t *icon = crab_icon(state);
+    if (icon == NULL) {
+        /* No bitmap for this state: ASCII crab + word on the state colour. */
+        char buf[48];
+        snprintf(buf, sizeof(buf), "%s\n\n%s", crab_face(state), state);
+        paint(state_color(state), buf);
+        return;
+    }
+    /* Crab bitmap centered on the mood-colour ring. */
+    if (s_screen == NULL || s_icon == NULL) return;
+    if (lvgl_port_lock(0)) {
+        lv_obj_set_style_bg_color(s_screen, state_color(state), 0);
+        lv_image_set_src(s_icon, icon);
+        lv_obj_remove_flag(s_icon, LV_OBJ_FLAG_HIDDEN);
+        if (s_label != NULL) {
+            lv_obj_add_flag(s_label, LV_OBJ_FLAG_HIDDEN);
+        }
+        lvgl_port_unlock();
+    }
 }
 
 void display_show(const char *text) {
-    paint(lv_color_black(), text);      /* messages: white on black */
+    paint(lv_color_black(), text);      /* messages: white on black, no crab */
 }
 
 esp_err_t display_init(i2c_master_bus_handle_t *out_i2c_bus) {

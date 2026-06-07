@@ -3,6 +3,11 @@ idf_component_register(
         "main.c"
         "app_version.c"
         "display.c"
+        "crab_icons/crab_idle.c"
+        "crab_icons/crab_listening.c"
+        "crab_icons/crab_thinking.c"
+        "crab_icons/crab_speaking.c"
+        "crab_icons/crab_error.c"
         "st77916_variant.c"
         "touch.c"
         "touch_geom.c"
@@ -42,6 +47,8 @@ idf_component_register(
 )
 
 # Stamp the build with a version string so boot logs are traceable.
+# LV_LVGL_H_INCLUDE_SIMPLE makes the generated crab_icons/*.c use #include "lvgl.h".
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     APP_VERSION="${CMAKE_PROJECT_VERSION}"
+    LV_LVGL_H_INCLUDE_SIMPLE=1
 )

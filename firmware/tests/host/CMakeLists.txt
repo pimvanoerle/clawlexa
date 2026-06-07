@@ -141,6 +141,7 @@ add_test(NAME test_wake_gate COMMAND test_wake_gate)
 add_executable(test_display_sequence
     test_display_sequence.c
     fakes/fake_idf.c
+    fakes/fake_crab_icons.c
     "${FIRMWARE_MAIN}/display.c"
     "${FIRMWARE_MAIN}/st77916_variant.c"
 )
