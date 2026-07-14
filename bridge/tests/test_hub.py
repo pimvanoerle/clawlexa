@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 
+from clawlexa_bridge.conversation import Conversation
 from clawlexa_bridge.hub import Hub
 from clawlexa_bridge.tts import FakeTTS
 
@@ -38,6 +39,28 @@ def test_next_utterance_times_out():
             return "timeout"
 
     assert asyncio.run(run()) == "timeout"
+
+
+def test_end_conversation_forces_the_conversation_to_end():
+    """The agent's end_conversation flips the attached Conversation to should_end."""
+    async def run():
+        hub = Hub(FakeTTS(), send_wav=None)
+        conv = Conversation()
+        conv.opened()
+        hub.attach(FakeWS(), conv)
+        await hub.end_conversation()
+        return conv.should_end()
+
+    assert asyncio.run(run()) is True
+
+
+def test_end_conversation_without_a_conversation_is_a_noop():
+    async def run():
+        hub = Hub(FakeTTS(), send_wav=None)
+        await hub.end_conversation()  # no device/conversation attached — must not raise
+        return "ok"
+
+    assert asyncio.run(run()) == "ok"
 
 
 def test_speak_without_device_raises():

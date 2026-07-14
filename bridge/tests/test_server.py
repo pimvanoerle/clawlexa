@@ -11,6 +11,7 @@ import json
 import websockets
 
 from clawlexa_bridge import server
+from clawlexa_bridge.conversation import Conversation
 from clawlexa_bridge.stt import FakeSTT
 from clawlexa_bridge.tts import FakeTTS
 from clawlexa_bridge.vad import Endpointer
@@ -198,6 +199,27 @@ def test_empty_transcript_is_skipped(tmp_path, monkeypatch):
 
     asyncio.run(run())
     assert fake_tts.calls == []  # no reply synthesized for empty speech
+
+
+def test_conversation_idle_sends_end_turn():
+    """After a wake with no speech, the bridge tells the device to re-arm."""
+    async def run():
+        # A snappy window so the test doesn't wait the real 7s.
+        conv_factory = lambda: Conversation(window_s=0.1, reply_timeout_s=1.0)
+        handler = functools.partial(server.handle_connection,
+                                    conversation_factory=conv_factory,
+                                    watchdog_tick_s=0.02)
+        async with websockets.serve(handler, "127.0.0.1", 0) as srv:
+            port = srv.sockets[0].getsockname()[1]
+            async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"type": "audio_begin", "rate": 16000,
+                                          "channels": 1, "bits": 16}))
+                # No speech: after the window, the bridge should send end_turn.
+                msg = await asyncio.wait_for(ws.recv(), timeout=3)
+                return json.loads(msg)
+
+    msg = asyncio.run(run())
+    assert msg["type"] == "end_turn"
 
 
 def test_mcp_mode_routes_utterance_to_hub(tmp_path, monkeypatch):

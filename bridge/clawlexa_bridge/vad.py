@@ -48,6 +48,12 @@ class Endpointer:
         self._voiced_run = 0          # consecutive voiced frames (arming start)
         self._silence_run = 0         # consecutive silent frames (arming end)
 
+    @property
+    def in_speech(self) -> bool:
+        """True while an utterance is in progress — the bridge uses this to keep
+        the conversation window open while the user is mid-sentence."""
+        return self._in_speech
+
     def feed(self, pcm: bytes) -> list[bytes]:
         """Consume PCM; return any utterances that completed within it."""
         self._buf += pcm

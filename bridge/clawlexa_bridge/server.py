@@ -13,7 +13,9 @@ import wave
 import websockets
 
 from .audio import AudioRecorder
-from .protocol import parse_message, play_begin_message, play_end_message, welcome_message
+from .conversation import Conversation
+from .protocol import (end_turn_message, parse_message, play_begin_message,
+                       play_end_message, welcome_message)
 from .stt import STT, WhisperSTT
 from .tts import TTS, PiperTTS
 from .vad import Endpointer
@@ -44,13 +46,15 @@ async def send_wav(ws, path: str) -> None:
 
 
 async def _handle_utterance(ws, pcm: bytes, rate: int,
-                            stt: STT | None, tts: TTS | None, hub=None) -> bool:
+                            stt: STT | None, tts: TTS | None, hub=None,
+                            conv: Conversation | None = None) -> bool:
     """Save one VAD-segmented utterance, transcribe it, and dispatch it.
 
     With a `hub` (MCP mode), the transcript goes to the agent, which replies via
     the `speak` tool — returns False (no immediate reply). Standalone, it echoes
     "You said: X" and returns True so the caller can apply half-duplex backoff.
-    STT/TTS are blocking — kept off the event loop with to_thread.
+    STT/TTS are blocking — kept off the event loop with to_thread. `conv` (if set)
+    is told a reply is now owed so the conversation window holds open (SPEC §7).
     """
     rec = AudioRecorder()
     rec.begin(rate, 1, 16)
@@ -64,12 +68,18 @@ async def _handle_utterance(ws, pcm: bytes, rate: int,
         log.info("utterance had no speech; skipping")
         return False
     log.info('you said: "%s"', text)
+    if conv is not None:  # a real transcript: the agent now owes a reply
+        conv.utterance_submitted()
     if hub is not None:  # MCP mode: hand the transcript to the agent
         await hub.submit_utterance(text)
         return False
     if tts is not None:  # standalone loopback
         wav = await asyncio.to_thread(tts.synthesize, reply_text(text))
+        if conv is not None:
+            conv.reply_started()
         await send_wav(ws, wav)
+        if conv is not None:
+            conv.reply_finished()
         return True
     return False
 
@@ -78,29 +88,54 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol,
                             stt: STT | None = None,
                             tts: TTS | None = None,
                             endpointer_factory=None,
-                            hub=None) -> None:
+                            hub=None,
+                            conversation_factory=None,
+                            watchdog_tick_s: float = 0.25) -> None:
     peer = ws.remote_address
     log.info("device connected from %s", peer)
-    if hub is not None:
-        hub.attach(ws)
     make_ep = endpointer_factory or (lambda rate: Endpointer(rate=rate))
+    make_conv = conversation_factory or (lambda: Conversation())
+    conv = make_conv()  # bridge-driven multi-turn window (SPEC §7)
+    if hub is not None:
+        hub.attach(ws, conv)
     ep: Endpointer | None = None  # set between audio_begin and audio_end
     rate = 16000
+
+    async def watchdog() -> None:
+        """When the conversation goes idle, tell the device to stop streaming and
+        re-arm its wake word. Runs alongside the recv loop; the only thing that
+        ends a conversation now that the firmware no longer times itself out."""
+        nonlocal ep
+        try:
+            while True:
+                await asyncio.sleep(watchdog_tick_s)
+                if conv.should_end():
+                    await ws.send(end_turn_message())
+                    conv.closed()
+                    ep = None  # ignore any frames until the next audio_begin
+                    log.info("conversation over -> end_turn (re-arm wake)")
+        except (asyncio.CancelledError, websockets.ConnectionClosed):
+            pass
+
+    watch = asyncio.create_task(watchdog())
     try:
         async for message in ws:
             # Binary frames are PCM from the device's continuous mic stream;
             # the VAD endpointer slices them into utterances.
             if isinstance(message, (bytes, bytearray)):
                 if ep is None:
-                    continue  # stray audio before audio_begin
+                    continue  # stray audio before audio_begin (or after end_turn)
                 for utt in ep.feed(message):
-                    spoke = await _handle_utterance(ws, utt, rate, stt, tts, hub)
+                    spoke = await _handle_utterance(ws, utt, rate, stt, tts, hub, conv)
                     if spoke:
                         # Half-duplex: we just played a reply. Reset the
                         # endpointer so any of our own audio the mic caught
                         # doesn't get treated as a new utterance.
                         ep = make_ep(rate)
                         break
+                # Mid-sentence speech keeps the follow-up window from re-arming.
+                if ep is not None and ep.in_speech:
+                    conv.voice_activity()
                 continue
             try:
                 msg = parse_message(message)
@@ -114,23 +149,27 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol,
             elif mtype == "audio_begin":
                 rate = msg.get("rate", 16000)
                 ep = make_ep(rate)
+                conv.opened()  # wake fired: a conversation is now live
                 log.info("stream open (%dHz) — VAD endpointing", rate)
             elif mtype == "audio_end":
                 if ep is not None:
                     utt = ep.flush()
                     if utt:
-                        await _handle_utterance(ws, utt, rate, stt, tts, hub)
+                        await _handle_utterance(ws, utt, rate, stt, tts, hub, conv)
                     ep = None
+                conv.closed()
                 log.info("stream closed")
             else:
                 log.info("recv %r", msg)
     except websockets.ConnectionClosed:
         pass
     finally:
+        watch.cancel()
         if ep is not None:  # device dropped mid-stream — keep the last utterance
             utt = ep.flush()
             if utt:
-                await _handle_utterance(ws, utt, rate, stt, tts, hub)
+                await _handle_utterance(ws, utt, rate, stt, tts, hub, conv)
+        conv.closed()
         if hub is not None:
             hub.detach(ws)
         log.info("device disconnected from %s", peer)

@@ -4,6 +4,7 @@ import pytest
 
 from clawlexa_bridge.protocol import (
     PROTOCOL_VERSION,
+    end_turn_message,
     parse_message,
     play_begin_message,
     play_end_message,
@@ -31,6 +32,10 @@ def test_play_begin_carries_duration():
 
 def test_play_end():
     assert json.loads(play_end_message())["type"] == "play_end"
+
+
+def test_end_turn():
+    assert json.loads(end_turn_message())["type"] == "end_turn"
 
 
 def test_set_state_message_valid():

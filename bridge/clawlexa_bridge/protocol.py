@@ -38,6 +38,14 @@ def play_end_message() -> str:
     return json.dumps({"type": "play_end"})
 
 
+def end_turn_message() -> str:
+    """Tell the device the conversation is over — stop streaming and re-arm the
+    wake word. A wake opens a *conversation* (possibly several turns); the bridge
+    decides it has gone idle and sends this so the firmware doesn't need its own
+    silence timers (SPEC §7, multi-turn conversation window)."""
+    return json.dumps({"type": "end_turn"})
+
+
 # The device's ambient status indicator (SPEC §8). Agent-driven via set_state.
 DISPLAY_STATES = ("idle", "listening", "thinking", "speaking", "error")
 

@@ -23,15 +23,18 @@ class Hub:
         self._tts = tts
         self._send_wav = send_wav        # async (ws, wav_path) -> None
         self._ws = None                  # the active device connection, if any
+        self._conv = None                # the connection's Conversation, if any
         self._utterances: asyncio.Queue[str] = asyncio.Queue()
 
     # --- device link side ----------------------------------------------------
-    def attach(self, ws) -> None:
+    def attach(self, ws, conversation=None) -> None:
         self._ws = ws
+        self._conv = conversation
 
     def detach(self, ws) -> None:
         if self._ws is ws:
             self._ws = None
+            self._conv = None
 
     @property
     def device_connected(self) -> bool:
@@ -55,11 +58,25 @@ class Hub:
         doesn't re-listen over its own voice (half-duplex)."""
         ws = self._require_ws()
         wav = await asyncio.to_thread(self._tts.synthesize, text)
+        # Bracket the reply so the conversation window doesn't re-arm mid-speech
+        # and, once done, starts the follow-up silence timer (SPEC §7).
+        if self._conv is not None:
+            self._conv.reply_started()
         await self._send_wav(ws, wav)
         with wave.open(wav, "rb") as w:
             play_s = w.getnframes() / w.getframerate()
         await asyncio.sleep(play_s)
+        if self._conv is not None:
+            self._conv.reply_finished(has_more=not self._utterances.empty())
         log.info('spoke: "%s"', text)
+
+    async def end_conversation(self) -> None:
+        """The agent signalled the conversation is over (a goodbye) — end it now so
+        the device re-arms its wake word instead of waiting out the follow-up
+        window. The server's watchdog sends the actual end_turn on its next tick."""
+        if self._conv is not None:
+            self._conv.end_now()
+        log.info("end_conversation requested by agent")
 
     async def set_state(self, state: str) -> None:
         """Set the device's ambient status indicator (SPEC §8)."""

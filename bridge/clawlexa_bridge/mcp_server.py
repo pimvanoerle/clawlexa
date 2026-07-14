@@ -46,6 +46,14 @@ def build_mcp(hub: Hub) -> FastMCP:
         return "ok"
 
     @mcp.tool()
+    async def end_conversation() -> str:
+        """End the current voice conversation now: the device stops listening and
+        re-arms its wake word. Call this when the user says goodbye or the chat is
+        clearly over, so it doesn't sit listening for the silence timeout."""
+        await hub.end_conversation()
+        return "ok"
+
+    @mcp.tool()
     async def set_state(state: str) -> str:
         """Set the device's ambient status indicator. One of:
         idle | listening | thinking | speaking | error."""
