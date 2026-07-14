@@ -9,6 +9,7 @@
 #include "esp_check.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
 
@@ -27,12 +28,15 @@ static const char *TAG = "ws";
 #define WS_CONT_OPCODE   0x00
 #define MIC_FRAME_SAMPLES 256   /* 16 ms per binary frame @ 16 kHz */
 #define MIC_PLAYBACK_TAIL_US 300000  /* keep mic muted 300 ms past playback */
+#define LINK_ERROR_GRACE_US 4000000  /* link down this long -> error crab (debounce) */
+#define MIC_SEND_FAIL_LIMIT 60   /* ~1s of failing sends -> treat a "connected" socket as dead */
 
 static esp_websocket_client_handle_t s_client;
 static volatile bool s_connected;
 static volatile int64_t s_mute_until_us;  /* half-duplex: mute mic while we speak */
 static volatile bool s_turn_end;  /* set on end_turn: the bridge ended the conversation */
 static volatile bool s_streaming;  /* true while a wake-triggered conversation is open */
+static volatile int s_send_fails;  /* consecutive mic-send failures (zombie-socket detection) */
 static volatile bool s_tap_pending;  /* set by ws_on_tap() from the touch task */
 
 void ws_on_tap(void) {
@@ -53,6 +57,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data
     case WEBSOCKET_EVENT_CONNECTED: {
         ESP_LOGI(TAG, "connected");
         s_connected = true;
+        s_send_fails = 0;  /* fresh socket: clear any zombie-send tally */
         char hello[96];
         int len = snprintf(hello, sizeof(hello),
                            "{\"type\":\"hello\",\"device\":\"clawlexa\",\"fw\":\"%s\"}",
@@ -171,7 +176,9 @@ bool ws_is_connected(void) {
  * follow-ups need no re-wake. The conversation ends — audio_end, back to
  * LISTENING — when the bridge sends end_turn (it owns the idle timing, SPEC §7),
  * a tap cancels, or the link drops. Half-duplex: while our own reply plays we
- * neither stream nor listen (mic_gate covers the clip). */
+ * neither stream nor listen (mic_gate covers the clip). If the bridge link stays
+ * down (the WS dropped, or mic sends keep failing on a zombie socket) the device
+ * shows the error crab and a tap reboots it back to a clean, connected state. */
 static void mic_stream_task(void *arg) {
     (void)arg;
     if (!wake_detector_init()) {
@@ -179,6 +186,7 @@ static void mic_stream_task(void *arg) {
     }
     int16_t buf[MIC_FRAME_SAMPLES];
     wake_state_t state = WAKE_LISTENING;
+    int64_t link_down_since = 0;  /* when the bridge link first went down (0 = healthy) */
     while (1) {
         int got = mic_read_samples(buf, MIC_FRAME_SAMPLES);
         if (got <= 0) {
@@ -186,6 +194,38 @@ static void mic_stream_task(void *arg) {
             continue;
         }
         int64_t now = esp_timer_get_time();
+
+        /* Link health (debounced): the link is down if the WebSocket dropped, or
+         * if mic sends keep failing on a "connected" (zombie) socket. After a
+         * short grace, show the error crab and stop streaming; a tap then reboots
+         * us out of it. A restored link re-arms LISTENING. */
+        bool link_down = !s_connected || s_send_fails >= MIC_SEND_FAIL_LIMIT;
+        if (link_down) {
+            if (link_down_since == 0) {
+                link_down_since = now;
+            }
+            if (state != WAKE_ERROR && now - link_down_since > LINK_ERROR_GRACE_US) {
+                ESP_LOGW(TAG, "bridge link down -> error (tap to restart)");
+                state = wake_gate_next(state, WAKE_EV_LINK_DOWN);
+                s_streaming = false;
+                display_set_state("error");
+            }
+        } else {
+            if (state == WAKE_ERROR) {
+                ESP_LOGI(TAG, "bridge link restored -> listening");
+                state = wake_gate_next(state, WAKE_EV_LINK_UP);
+                display_set_state("idle");
+            }
+            link_down_since = 0;
+        }
+        if (state == WAKE_ERROR) {
+            if (take_tap()) {  /* tap-to-restart: reboot back to a clean state */
+                ESP_LOGW(TAG, "tap in error -> restarting");
+                vTaskDelay(pdMS_TO_TICKS(50));  /* let the log line flush first */
+                esp_restart();
+            }
+            continue;  /* don't wake-detect or stream while the link is down */
+        }
 
         if (state == WAKE_LISTENING) {
             /* Don't react to our own reply still draining from the speaker. */
@@ -220,6 +260,9 @@ static void mic_stream_task(void *arg) {
             if (esp_websocket_client_send_bin(s_client, (const char *)buf,
                                               got * (int)sizeof(int16_t), portMAX_DELAY) < 0) {
                 ESP_LOGW(TAG, "mic send failed");
+                s_send_fails++;  /* a run of these flags a zombie socket (above) */
+            } else {
+                s_send_fails = 0;
             }
         }
         bool ended = s_turn_end;      /* the bridge sent end_turn (conversation idle) */
