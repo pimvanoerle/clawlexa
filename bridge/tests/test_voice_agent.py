@@ -215,6 +215,38 @@ def test_brain_keeps_one_warm_session_across_turns():
     assert fc.queries == ["one", "two"]
 
 
+def test_warm_primes_a_fresh_session():
+    """Pre-warm opens the session and sends the priming prompt once."""
+    fc = FakeClient([[AssistantMessage([TextBlock("ready")])]])
+    brain = ClaudeSessionBrain(client_factory=lambda: fc, warm_prompt="PRIME NOW")
+
+    asyncio.run(brain.warm())
+    assert fc.connected == 1
+    assert fc.queries == ["PRIME NOW"]  # model warmed + persona loaded before turn 1
+
+
+def test_warm_without_prompt_only_connects():
+    fc = FakeClient([])
+    brain = ClaudeSessionBrain(client_factory=lambda: fc, warm_prompt=None)
+
+    asyncio.run(brain.warm())
+    assert fc.connected == 1
+    assert fc.queries == []  # nothing sent when priming is disabled
+
+
+def test_warm_does_not_reprime_an_open_session():
+    fc = FakeClient([[AssistantMessage([TextBlock("ready")])]])
+    brain = ClaudeSessionBrain(client_factory=lambda: fc, warm_prompt="PRIME")
+
+    async def run():
+        await brain.warm()
+        await brain.warm()  # already open — must not connect or prime again
+
+    asyncio.run(run())
+    assert fc.connected == 1
+    assert fc.queries == ["PRIME"]  # primed exactly once
+
+
 def test_end_session_saves_memory_then_closes():
     fc = FakeClient([[AssistantMessage([TextBlock("ok")])],   # the reply turn
                      [AssistantMessage([TextBlock("ok")])]])   # the memory-save turn

@@ -71,6 +71,19 @@ VOICE_SYSTEM_PROMPT = (
 BRAIN_ERROR_REPLY = "Sorry, I hit a problem thinking about that."
 EMPTY_BRAIN_REPLY = "I didn't catch that — could you say it again?"
 
+# Sent once when a session first opens (pre-warm), before anyone speaks. It warms
+# the model (so turn one isn't a cold generation), has the agent load its persona
+# and memory (so it's in character from the first word), and tells it it's now
+# speaking through clawlexa. The reply is discarded. Deployment-specific wording
+# (e.g. "read soul.md", the user's name) is passed via --warm-prompt.
+WARM_PROMPT = (
+    "You're starting a voice session through clawlexa — your hardware body: a small "
+    "device with a microphone and speaker that a person talks to out loud. Load your "
+    "usual persona, context, and memory now so you're fully yourself and ready. This "
+    "is a spoken session, read aloud by text-to-speech, so keep replies short and "
+    "natural with no markdown. Reply with only: ready"
+)
+
 # Farewell phrases: if the user's utterance clearly signs off, end the
 # conversation even if the brain forgot the sentinel (belt-and-suspenders).
 _FAREWELL_RE = re.compile(
@@ -129,6 +142,7 @@ class ClaudeSessionBrain(Brain):
     def __init__(self, cwd: Optional[str] = None, cli_path: Optional[str] = None,
                  system_prompt: str = VOICE_SYSTEM_PROMPT, timeout: float = 120.0,
                  memory_prompt: Optional[str] = None,
+                 warm_prompt: Optional[str] = WARM_PROMPT,
                  permission_mode: str = "acceptEdits",
                  setting_sources: Sequence[str] = ("project", "user"),
                  client_factory: Optional[Callable[[], object]] = None) -> None:
@@ -137,6 +151,7 @@ class ClaudeSessionBrain(Brain):
         self._system_prompt = system_prompt
         self._timeout = timeout
         self._memory_prompt = memory_prompt
+        self._warm_prompt = warm_prompt
         self._permission_mode = permission_mode
         self._setting_sources = tuple(setting_sources)
         self._client_factory = client_factory or self._default_factory
@@ -160,11 +175,15 @@ class ClaudeSessionBrain(Brain):
         )
         return ClaudeSDKClient(options=opts)
 
-    async def _ensure(self) -> None:
+    async def _ensure(self) -> bool:
+        """Open the session if needed. Returns True if this call connected a fresh
+        one (so the caller can prime it), False if it was already up."""
         if self._client is None:
             client = self._client_factory()  # may raise BrainError (missing dep)
             await client.connect()
             self._client = client
+            return True
+        return False
 
     async def _drain(self) -> str:
         """Collect the assistant's spoken text from one response; raise BrainError
@@ -181,13 +200,22 @@ class ClaudeSessionBrain(Brain):
         return "".join(parts).strip()
 
     async def warm(self) -> None:
-        """Pre-open the session so the first turn skips cold-start. Failure is
-        non-fatal — the first reply will retry and surface the error."""
+        """Pre-open the session so the first turn skips cold-start, and prime it
+        (warm the model + load persona + note the clawlexa context). Failure is
+        non-fatal — the first reply will retry and surface any real error."""
         async with self._lock:
             try:
-                await self._ensure()
+                fresh = await self._ensure()
             except BrainError as e:
                 log.warning("pre-warm failed (first turn will retry): %s", e)
+                return
+            if fresh and self._warm_prompt:  # prime only a newly-opened session
+                try:
+                    await asyncio.wait_for(self._client.query(self._warm_prompt), self._timeout)
+                    ready = await asyncio.wait_for(self._drain(), self._timeout)
+                    log.info("session primed (%r)", ready[:40])
+                except Exception as e:  # connection is up; don't block on a prime miss
+                    log.warning("pre-warm priming failed (continuing): %s", e)
 
     async def reply(self, transcript: str) -> str:
         async with self._lock:
@@ -385,6 +413,10 @@ def main() -> None:
                         help="when a conversation goes idle, this is sent to the brain "
                              "(in its warm session) to save memory. '{date}' expands to "
                              "YYYY_MM_DD. Omit to disable.")
+    parser.add_argument("--warm-prompt", default=WARM_PROMPT,
+                        help="sent once when a session opens (pre-warm), before anyone "
+                             "speaks: warms the model and has the agent load its persona "
+                             "so turn one is fast and in character. Set '' to disable.")
     parser.add_argument("--host", default="0.0.0.0", help="device-link bind address")
     parser.add_argument("--port", type=int, default=8765, help="device-link port")
     args = parser.parse_args()
@@ -393,7 +425,8 @@ def main() -> None:
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
                         stream=sys.stderr)
     brain = ClaudeSessionBrain(cwd=args.brain_cwd, cli_path=args.claude_cli,
-                               timeout=args.brain_timeout, memory_prompt=args.memory_prompt)
+                               timeout=args.brain_timeout, memory_prompt=args.memory_prompt,
+                               warm_prompt=args.warm_prompt or None)
     try:
         asyncio.run(_serve(brain, args.host, args.port, args.idle_timeout))
     except KeyboardInterrupt:
