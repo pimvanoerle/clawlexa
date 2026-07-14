@@ -27,12 +27,12 @@ static const char *TAG = "ws";
 #define WS_CONT_OPCODE   0x00
 #define MIC_FRAME_SAMPLES 256   /* 16 ms per binary frame @ 16 kHz */
 #define MIC_PLAYBACK_TAIL_US 300000  /* keep mic muted 300 ms past playback */
-#define WAKE_TURN_TIMEOUT_US (10 * 1000000)  /* end a turn if the bridge never replies */
 
 static esp_websocket_client_handle_t s_client;
 static volatile bool s_connected;
 static volatile int64_t s_mute_until_us;  /* half-duplex: mute mic while we speak */
-static volatile bool s_turn_end;  /* set on play_end: the bridge's reply finished */
+static volatile bool s_turn_end;  /* set on end_turn: the bridge ended the conversation */
+static volatile bool s_streaming;  /* true while a wake-triggered conversation is open */
 static volatile bool s_tap_pending;  /* set by ws_on_tap() from the touch task */
 
 void ws_on_tap(void) {
@@ -77,9 +77,19 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data
             s_mute_until_us = mic_gate_update(s_mute_until_us, ctrl,
                                               esp_timer_get_time(),
                                               MIC_PLAYBACK_TAIL_US);
-            /* play_end means the reply finished — close the wake-triggered turn. */
-            if (strstr(ctrl, "play_end") != NULL) {
+            /* end_turn means the bridge decided the conversation is idle — stop
+             * streaming and re-arm the wake word. A reply (play_end) no longer
+             * ends the turn: the mic keeps streaming for follow-ups until the
+             * bridge says stop, so a wake opens a whole conversation (SPEC §7). */
+            if (strstr(ctrl, "end_turn") != NULL) {
                 s_turn_end = true;
+            } else if (strstr(ctrl, "play_end") != NULL && s_streaming) {
+                /* Reply finished playing mid-conversation: the follow-up window
+                 * is open, so show the attentive (listening) crab — we're waiting
+                 * for the user, not asleep. Only end_turn (above) returns to the
+                 * idle crab. Gated on s_streaming so a reply that plays after the
+                 * conversation already ended can't leave a stale listening crab. */
+                display_set_state("listening");
             }
             /* Agent-driven display (Phase 6): set_state -> status word/color,
              * show -> arbitrary line. (ctrl is the frame truncated to 95 bytes;
@@ -154,12 +164,14 @@ bool ws_is_connected(void) {
     return s_connected;
 }
 
-/* Wake-gated mic loop (Phase 4b). In LISTENING the mic only feeds the on-device
- * wake detector — nothing leaves the device. When the wake word fires, open a
- * streaming turn (audio_begin -> PCM frames) so the bridge transcribes the
- * command; the turn ends — audio_end, back to LISTENING — when the bridge's
- * reply finishes (play_end) or a no-reply timeout elapses. Half-duplex: while
- * our own reply plays we neither stream nor listen (mic_gate covers the clip). */
+/* Wake-gated mic loop (Phase 4b / 6b). In LISTENING the mic only feeds the
+ * on-device wake detector — nothing leaves the device. When the wake word fires,
+ * open a streaming conversation (audio_begin -> PCM frames) so the bridge
+ * transcribes each command; the mic keeps streaming across multiple turns so
+ * follow-ups need no re-wake. The conversation ends — audio_end, back to
+ * LISTENING — when the bridge sends end_turn (it owns the idle timing, SPEC §7),
+ * a tap cancels, or the link drops. Half-duplex: while our own reply plays we
+ * neither stream nor listen (mic_gate covers the clip). */
 static void mic_stream_task(void *arg) {
     (void)arg;
     if (!wake_detector_init()) {
@@ -167,7 +179,6 @@ static void mic_stream_task(void *arg) {
     }
     int16_t buf[MIC_FRAME_SAMPLES];
     wake_state_t state = WAKE_LISTENING;
-    int64_t turn_deadline = 0;
     while (1) {
         int got = mic_read_samples(buf, MIC_FRAME_SAMPLES);
         if (got <= 0) {
@@ -187,21 +198,22 @@ static void mic_stream_task(void *arg) {
                 woke = true;
             }
             if (woke && s_connected) {
-                ESP_LOGI(TAG, "wake -> streaming a turn");
+                ESP_LOGI(TAG, "wake -> streaming a conversation");
                 state = wake_gate_next(state, WAKE_EV_WAKE);
                 s_turn_end = false;
+                s_streaming = true;
                 const char *begin =
                     "{\"type\":\"audio_begin\",\"rate\":16000,\"channels\":1,\"bits\":16}";
                 esp_websocket_client_send_text(s_client, begin, strlen(begin), portMAX_DELAY);
                 display_set_state("listening");  /* acknowledge the wake/tap immediately */
-                turn_deadline = now + WAKE_TURN_TIMEOUT_US;
             }
             continue;
         }
 
-        /* WAKE_STREAMING: forward the command to the bridge. */
-        if (!s_connected) {  /* lost the link mid-turn */
+        /* WAKE_STREAMING: forward the conversation to the bridge until it ends. */
+        if (!s_connected) {  /* lost the link mid-conversation */
             state = wake_gate_next(state, WAKE_EV_TURN_END);
+            s_streaming = false;
             continue;
         }
         if (!mic_gate_muted(s_mute_until_us, now)) {  /* half-duplex */
@@ -210,18 +222,15 @@ static void mic_stream_task(void *arg) {
                 ESP_LOGW(TAG, "mic send failed");
             }
         }
-        bool reply_done = s_turn_end;     /* turn finished because the reply played */
-        bool tapped = take_tap();          /* evaluated once so the flag is always cleared */
-        if (reply_done || now > turn_deadline || tapped) {
-            ESP_LOGI(TAG, "turn end -> listening");
+        bool ended = s_turn_end;      /* the bridge sent end_turn (conversation idle) */
+        bool tapped = take_tap();      /* evaluated once so the flag is always cleared */
+        if (ended || tapped) {
+            ESP_LOGI(TAG, "conversation end -> listening");
             const char *end = "{\"type\":\"audio_end\"}";
             esp_websocket_client_send_text(s_client, end, strlen(end), portMAX_DELAY);
             state = wake_gate_next(state, WAKE_EV_TURN_END);
-            if (!reply_done) {
-                /* No reply came (timeout / tap-cancel) — clear the listening
-                 * crab. On a reply the agent already drove speaking->idle. */
-                display_set_state("idle");
-            }
+            s_streaming = false;
+            display_set_state("idle");  /* conversation over — back to the idle crab */
         }
     }
 }
