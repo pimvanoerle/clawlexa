@@ -15,7 +15,9 @@ from tools.voice_agent import (
     BrainError,
     ClaudeSessionBrain,
     VoiceIO,
+    is_farewell,
     run_voice_loop,
+    strip_end_sentinel,
 )
 
 
@@ -26,6 +28,7 @@ class FakeVoiceIO(VoiceIO):
         self.states = []
         self.spoken = []
         self.shown = []
+        self.ended_conversations = 0
 
     async def wait_for_utterance(self, timeout_s=None):
         return self._utterances.pop(0) if self._utterances else ""
@@ -39,12 +42,16 @@ class FakeVoiceIO(VoiceIO):
     async def show(self, text):
         self.shown.append(text)
 
+    async def end_conversation(self):
+        self.ended_conversations += 1
+
 
 class FakeBrain(Brain):
     def __init__(self, fn=lambda t: f"reply to {t}"):
         self._fn = fn
         self.heard = []
         self.ended = 0
+        self.warmed = 0
 
     async def reply(self, transcript):
         self.heard.append(transcript)
@@ -52,6 +59,9 @@ class FakeBrain(Brain):
         if isinstance(r, Exception):
             raise r
         return r
+
+    async def warm(self):
+        self.warmed += 1
 
     async def end_session(self):
         self.ended += 1
@@ -100,6 +110,8 @@ def test_happy_turn_drives_idle_thinking_speaking_and_speaks_reply():
     asyncio.run(run_voice_loop(io, FakeBrain(lambda t: f"You asked: {t}"), max_turns=1))
 
     assert io.spoken == ["You asked: what time is it"]
+    # One initial idle, then per-turn thinking/speaking; the agent does NOT force
+    # idle after speaking (the device shows listening during the follow-up window).
     assert io.states == ["idle", "thinking", "speaking"]
 
 
@@ -111,7 +123,8 @@ def test_empty_utterance_ends_session_without_consuming_a_turn():
     assert brain.ended == 1
     assert brain.heard == ["hello"]
     assert io.spoken == ["hi"]
-    assert io.states == ["idle", "idle", "thinking", "speaking"]
+    # idle is set once at startup (not per iteration): the empty turn adds none.
+    assert io.states == ["idle", "thinking", "speaking"]
 
 
 def test_brain_error_shows_error_state_and_speaks_apology():
@@ -127,6 +140,65 @@ def test_empty_reply_falls_back_to_a_prompt_to_repeat():
     asyncio.run(run_voice_loop(io, FakeBrain(lambda t: ""), max_turns=1))
 
     assert io.spoken == [EMPTY_BRAIN_REPLY]
+
+
+def test_loop_pre_warms_the_brain_before_the_first_turn():
+    """The session is opened at startup so turn one isn't a cold start."""
+    io = FakeVoiceIO(["hey there"])
+    brain = FakeBrain(lambda t: "hello")
+    asyncio.run(run_voice_loop(io, brain, max_turns=1))
+
+    assert brain.warmed >= 1
+
+
+def test_goodbye_keeps_the_brain_session_warm():
+    """A goodbye ends the *device* conversation but does not close the brain
+    session — it stays warm across conversations (only the idle reset closes it)."""
+    io = FakeVoiceIO(["okay bye"])
+    brain = FakeBrain(lambda t: "See ya!")
+    asyncio.run(run_voice_loop(io, brain, max_turns=1))
+
+    assert io.ended_conversations == 1  # device re-armed
+    assert brain.ended == 0             # session NOT closed on goodbye
+
+
+# --- natural conversation end (goodbye) -------------------------------------
+def test_farewell_utterance_ends_the_conversation():
+    """The user signing off ends the conversation even without the sentinel."""
+    io = FakeVoiceIO(["okay thanks, bye"])
+    asyncio.run(run_voice_loop(io, FakeBrain(lambda t: "See ya!"), max_turns=1))
+
+    assert io.spoken == ["See ya!"]
+    assert io.ended_conversations == 1
+
+
+def test_sentinel_reply_is_stripped_and_ends_conversation():
+    """The brain's <end> marker ends the conversation and never reaches TTS."""
+    io = FakeVoiceIO(["what's the time"])
+    asyncio.run(run_voice_loop(io, FakeBrain(lambda t: "It's noon. Talk later! <end>"),
+                               max_turns=1))
+
+    assert io.spoken == ["It's noon. Talk later!"]  # sentinel stripped
+    assert io.ended_conversations == 1
+
+
+def test_normal_turn_leaves_conversation_open():
+    io = FakeVoiceIO(["how are you"])
+    asyncio.run(run_voice_loop(io, FakeBrain(lambda t: "Doing great!"), max_turns=1))
+
+    assert io.ended_conversations == 0  # no re-arm — the follow-up window stays open
+
+
+def test_strip_end_sentinel():
+    assert strip_end_sentinel("bye now <end>") == ("bye now", True)
+    assert strip_end_sentinel("still chatting") == ("still chatting", False)
+
+
+def test_is_farewell():
+    assert is_farewell("okay, talk to you later")
+    assert is_farewell("Bye!")
+    assert is_farewell("that's all for now")
+    assert not is_farewell("what time is the game")
 
 
 # --- ClaudeSessionBrain: warm session + memory ------------------------------

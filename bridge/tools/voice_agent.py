@@ -14,9 +14,11 @@ call it mid-conversation and hang. Owning the loop here keeps voice isolated:
 the bridge is this process's private MCP server and never leaks into other
 surfaces.
 
-The loop, per turn:
+The loop, per turn (the agent sets thinking/speaking; the device itself shows
+"listening" while waiting for you and "idle" when the conversation ends, so a
+follow-up window doesn't look asleep):
 
-    idle  ->  wait_for_utterance  ->  thinking  ->  brain.reply(text)  ->  speaking  ->  speak
+    wait_for_utterance  ->  thinking  ->  brain.reply(text)  ->  speaking  ->  speak
 
 Memory + speed (so the crab remembers, and follow-ups feel instant):
   - The brain keeps **one warm Claude session** across turns, so it remembers the
@@ -40,6 +42,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import re
 import sys
 from abc import ABC, abstractmethod
 from datetime import date
@@ -47,14 +50,47 @@ from typing import Callable, Optional, Sequence
 
 log = logging.getLogger("clawlexa.voice")
 
+# Marker the brain appends when it judges the conversation over; stripped before
+# playback and used to end the conversation (device re-arms its wake word).
+END_SENTINEL = "<end>"
+
 # Spoken replies, not chat: keep the brain terse and TTS-friendly.
 VOICE_SYSTEM_PROMPT = (
     "You are a voice assistant speaking through a small speaker. Reply in one or "
     "two short, natural spoken sentences. Do not use markdown, lists, code blocks, "
-    "URLs, or emoji — your reply is read aloud by text-to-speech."
+    "URLs, or emoji — your reply is read aloud by text-to-speech. "
+    "Keep every reply fast: do not save notes, write or edit files, or run git "
+    "while replying — a session summary is saved for you automatically afterward. "
+    "Just talk. "
+    "When the conversation is naturally finished — the user says goodbye, signs "
+    "off, or otherwise ends it — give your short farewell and then append the "
+    f"marker {END_SENTINEL} on its own at the very end. The marker is removed "
+    "before playback; it tells the device the chat is over so it can stop "
+    "listening. Only add it when you're genuinely wrapping up."
 )
 BRAIN_ERROR_REPLY = "Sorry, I hit a problem thinking about that."
 EMPTY_BRAIN_REPLY = "I didn't catch that — could you say it again?"
+
+# Farewell phrases: if the user's utterance clearly signs off, end the
+# conversation even if the brain forgot the sentinel (belt-and-suspenders).
+_FAREWELL_RE = re.compile(
+    r"\b(bye|goodbye|good ?night|see (you|ya)|talk to you later|"
+    r"speak to you later|catch you later|that'?s all( for now)?|"
+    r"we'?re (all )?done|i'?m done( here)?)\b",
+    re.IGNORECASE,
+)
+
+
+def strip_end_sentinel(reply: str) -> tuple[str, bool]:
+    """Return (reply without the END_SENTINEL, whether it was present)."""
+    if END_SENTINEL in reply:
+        return reply.replace(END_SENTINEL, "").strip(), True
+    return reply, False
+
+
+def is_farewell(text: str) -> bool:
+    """True if `text` reads like the user signing off."""
+    return bool(_FAREWELL_RE.search(text))
 
 
 class BrainError(RuntimeError):
@@ -67,6 +103,11 @@ class Brain(ABC):
     async def reply(self, transcript: str) -> str:
         """Answer one utterance (and remember it for the rest of the conversation)."""
 
+    async def warm(self) -> None:
+        """Open/prepare the session ahead of the first utterance so turn one isn't
+        cold. Default: nothing (a brain with no warm-up cost)."""
+        return None
+
     async def end_session(self) -> None:
         """Conversation went idle — persist memory and/or tear down. Default: nothing."""
         return None
@@ -74,11 +115,13 @@ class Brain(ABC):
 
 class ClaudeSessionBrain(Brain):
     """A brain backed by a **warm** Claude Agent SDK session. The session is
-    opened lazily on the first utterance and kept alive across turns (so it
-    remembers the conversation and follow-ups skip cold-start), then closed by
-    ``end_session`` when the conversation goes idle — at which point it optionally
-    runs one more turn to save a memory note. Running it with ``cwd`` set to your
-    agent's vault gives it that agent's CLAUDE.md / persona / memory.
+    opened by ``warm`` (called at startup, so turn one isn't cold) and kept alive
+    across turns *and across conversations* — a goodbye ends the device turn but
+    not this session, so it stays warm and remembers. It's closed only by
+    ``end_session`` on the long idle reset, which first saves a memory note.
+    Running it with ``cwd`` set to your agent's vault gives it that agent's
+    CLAUDE.md / persona / memory. A lock serialises the client so a background
+    idle-save can't collide with a concurrent reply.
 
     `client_factory` is injectable for tests; by default it builds a real
     ClaudeSDKClient (imported lazily so the dependency is optional)."""
@@ -98,7 +141,8 @@ class ClaudeSessionBrain(Brain):
         self._setting_sources = tuple(setting_sources)
         self._client_factory = client_factory or self._default_factory
         self._client = None
-        self._turns = 0  # turns this conversation, reset when the session closes
+        self._turns = 0  # turns this session, reset when the session closes
+        self._lock = asyncio.Lock()  # serialise client use (reply vs bg idle-save)
 
     def _default_factory(self):
         try:
@@ -136,33 +180,44 @@ class ClaudeSessionBrain(Brain):
                         parts.append(getattr(block, "text", ""))
         return "".join(parts).strip()
 
+    async def warm(self) -> None:
+        """Pre-open the session so the first turn skips cold-start. Failure is
+        non-fatal — the first reply will retry and surface the error."""
+        async with self._lock:
+            try:
+                await self._ensure()
+            except BrainError as e:
+                log.warning("pre-warm failed (first turn will retry): %s", e)
+
     async def reply(self, transcript: str) -> str:
-        try:
-            await self._ensure()
-            await asyncio.wait_for(self._client.query(transcript), self._timeout)
-            out = await asyncio.wait_for(self._drain(), self._timeout)
-        except BrainError:
-            await self._safe_close()  # start the next turn from a fresh session
-            raise
-        except (asyncio.TimeoutError, Exception) as e:
-            await self._safe_close()
-            raise BrainError(str(e) or "brain failed") from e
+        async with self._lock:
+            try:
+                await self._ensure()
+                await asyncio.wait_for(self._client.query(transcript), self._timeout)
+                out = await asyncio.wait_for(self._drain(), self._timeout)
+            except BrainError:
+                await self._safe_close()  # start the next turn from a fresh session
+                raise
+            except (asyncio.TimeoutError, Exception) as e:
+                await self._safe_close()
+                raise BrainError(str(e) or "brain failed") from e
         self._turns += 1
         return out
 
     async def end_session(self) -> None:
-        try:
-            if self._client is not None and self._memory_prompt and self._turns > 0:
-                prompt = self._memory_prompt.replace(
-                    "{date}", date.today().strftime("%Y_%m_%d"))
-                log.info("saving voice session memory (%d turns)...", self._turns)
-                await asyncio.wait_for(self._client.query(prompt), self._timeout)
-                await asyncio.wait_for(self._drain(), self._timeout)
-        except Exception as e:
-            log.warning("memory save failed: %s", e)
-        finally:
-            await self._safe_close()
-            self._turns = 0
+        async with self._lock:
+            try:
+                if self._client is not None and self._memory_prompt and self._turns > 0:
+                    prompt = self._memory_prompt.replace(
+                        "{date}", date.today().strftime("%Y_%m_%d"))
+                    log.info("saving voice session memory (%d turns)...", self._turns)
+                    await asyncio.wait_for(self._client.query(prompt), self._timeout)
+                    await asyncio.wait_for(self._drain(), self._timeout)
+            except Exception as e:
+                log.warning("memory save failed: %s", e)
+            finally:
+                await self._safe_close()
+                self._turns = 0
 
     async def _safe_close(self) -> None:
         if self._client is not None:
@@ -186,6 +241,8 @@ class VoiceIO(ABC):
     async def speak(self, text: str) -> None: ...
     @abstractmethod
     async def show(self, text: str) -> None: ...
+    @abstractmethod
+    async def end_conversation(self) -> None: ...
 
 
 class McpVoiceIO(VoiceIO):
@@ -211,23 +268,45 @@ class McpVoiceIO(VoiceIO):
     async def show(self, text: str) -> None:
         await self._session.call_tool("show", {"text": text})
 
+    async def end_conversation(self) -> None:
+        await self._session.call_tool("end_conversation", {})
+
 
 # --- the loop ---------------------------------------------------------------
 async def run_voice_loop(io: VoiceIO, brain: Brain, *, idle_timeout_s: float = 1800.0,
                          max_turns: Optional[int] = None) -> None:
-    """Drive the device voice loop through `brain`. The brain's session stays warm
-    across turns; after `idle_timeout_s` of silence `end_session` runs (persist
-    memory + close the warm session), so the next utterance opens a fresh one. Set
-    `idle_timeout_s` <= 0 to keep the session open forever. A brain failure is
+    """Drive the device voice loop through `brain`. The brain is pre-warmed at
+    startup so turn one isn't a cold start, and its session stays warm across turns
+    *and across conversations* — a goodbye ends the device turn, not the session.
+    After `idle_timeout_s` of silence the session is reset in the background:
+    `end_session` saves a memory checkpoint and closes it, then it's re-warmed for
+    next time. Set `idle_timeout_s` <= 0 to never idle-reset. A brain failure is
     handled per-turn (error crab + spoken apology) so one bad turn doesn't kill the
-    loop. `max_turns` (for tests) stops after that many utterances."""
+    loop. `max_turns` (for tests) stops after that many utterances; any background
+    resets are awaited before returning."""
     timeout = idle_timeout_s if idle_timeout_s and idle_timeout_s > 0 else None
     turn = 0
+    bg: set = set()  # background tasks (idle memory-save + re-warm); awaited on exit
+
+    def spawn(coro) -> None:
+        t = asyncio.create_task(coro)
+        bg.add(t)
+        t.add_done_callback(bg.discard)
+    # Idle/listening are firmware-driven at the conversation boundaries: the
+    # device shows "listening" on wake and after each reply (the follow-up window
+    # is open), and "idle" when the bridge ends the conversation. So the agent
+    # only sets the initial idle and, per turn, thinking/speaking/error — it must
+    # NOT force idle after speaking, or the crab looks asleep while the device is
+    # still listening for a follow-up (SPEC §7).
+    await io.set_state("idle")
+    await brain.warm()  # pre-open the session so the first turn isn't a cold start
     while max_turns is None or turn < max_turns:
-        await io.set_state("idle")
         text = await io.wait_for_utterance(timeout)
         if not text:
-            await brain.end_session()  # idle: persist memory + drop the warm session
+            # Long idle: checkpoint memory and refresh the warm session in the
+            # background, so a wake right at the timeout isn't blocked (the brain
+            # serialises the save against the next reply).
+            spawn(_reset_session(brain))
             continue
         turn += 1
         log.info("heard: %r", text)
@@ -241,9 +320,28 @@ async def run_voice_loop(io: VoiceIO, brain: Brain, *, idle_timeout_s: float = 1
             continue
         if not reply:
             reply = EMPTY_BRAIN_REPLY
-        log.info("reply: %r", reply)
+        # Natural conversation end: the brain marks a goodbye with END_SENTINEL, or
+        # the user's own words clearly sign off. Strip the marker from what we
+        # speak, then (after the farewell plays) end the conversation so the device
+        # re-arms now instead of sitting through the follow-up silence window.
+        reply, wants_end = strip_end_sentinel(reply)
+        over = wants_end or is_farewell(text)
+        if not reply:  # sentinel was the whole reply — still say something
+            reply = EMPTY_BRAIN_REPLY
+        log.info("reply: %r%s", reply, "  [end]" if over else "")
         await io.set_state("speaking")
         await io.speak(reply)
+        if over:
+            await io.end_conversation()
+    if bg:  # let any in-flight idle reset (memory save + re-warm) finish
+        await asyncio.gather(*bg, return_exceptions=True)
+
+
+async def _reset_session(brain: Brain) -> None:
+    """Idle reset: save a memory checkpoint (this closes the session) then pre-warm
+    a fresh one, so the next conversation is both persisted and still warm."""
+    await brain.end_session()
+    await brain.warm()
 
 
 async def _serve(brain: Brain, host: str, port: int, idle_timeout_s: float) -> None:
