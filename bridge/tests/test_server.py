@@ -222,6 +222,37 @@ def test_conversation_idle_sends_end_turn():
     assert msg["type"] == "end_turn"
 
 
+def test_looks_like_noise():
+    from clawlexa_bridge.server import looks_like_noise
+    assert looks_like_noise("yeah yeah yeah yeah yeah")            # pure repetition
+    assert looks_like_noise("Let's go. Let's go. Let's go. Let's go.")  # phrase repeat
+    assert not looks_like_noise("what time is the meeting today")  # real sentence
+    assert not looks_like_noise("bye")                            # short + real
+    assert not looks_like_noise("okay thanks pinchy")             # short + real
+
+
+def test_noise_transcript_is_skipped(tmp_path, monkeypatch):
+    """A hallucination-style transcript (one word repeated) gets no reply."""
+    monkeypatch.chdir(tmp_path)
+    fake_stt = FakeSTT("yeah yeah yeah yeah yeah yeah")
+    fake_tts = FakeTTS()
+
+    async def run():
+        handler = functools.partial(server.handle_connection, stt=fake_stt,
+                                    tts=fake_tts, endpointer_factory=fast_ep)
+        async with websockets.serve(handler, "127.0.0.1", 0) as srv:
+            port = srv.sockets[0].getsockname()[1]
+            async with websockets.connect(f"ws://127.0.0.1:{port}") as ws:
+                await ws.send(json.dumps({"type": "audio_begin", "rate": 16000,
+                                          "channels": 1, "bits": 16}))
+                await ws.send(voiced(4))
+                await ws.send(json.dumps({"type": "audio_end"}))
+                await asyncio.sleep(0.3)
+
+    asyncio.run(run())
+    assert fake_tts.calls == []  # noise was filtered before any reply
+
+
 def test_mcp_mode_routes_utterance_to_hub(tmp_path, monkeypatch):
     """With a hub (MCP mode), the transcript goes to the agent — no echo reply."""
     monkeypatch.chdir(tmp_path)

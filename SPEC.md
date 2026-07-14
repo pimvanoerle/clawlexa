@@ -208,9 +208,14 @@ Candidates:
   timeout covers an agent that never replies. The pure `wake_gate`
   (LISTENING↔STREAMING) is unchanged; only the trigger for TURN_END moves from
   device-side `play_end` to the bridge's `end_turn`. Utterances spoken while the
-  agent is thinking already queue on the bridge (`Hub._utterances`) and drain in
-  order — "fire off two thoughts" works without a re-wake. Barge-in (talking over
-  the reply) still needs AEC — deferred to Phase 8.
+  agent is thinking already queue on the bridge (`Hub._utterances`); when the
+  agent is ready it drains the whole queue and **coalesces** it into one turn, so
+  "fire off two thoughts" works without a re-wake *and* a slow/erroring turn can't
+  build a growing backlog where the agent keeps answering stale snippets. A
+  transcript-level **noise gate** (`looks_like_noise`) drops STT hallucinations
+  (one short word repeated, e.g. "yeah yeah yeah…") before they queue, and the VAD
+  threshold is set above room-noise/echo. Barge-in (talking over the reply) still
+  needs AEC — deferred to Phase 8.
 - **Natural conversation end (goodbye).** Rather than always waiting out the
   silence window, the conversation ends the moment it's clearly over: the agent
   appends a `<end>` sentinel to its reply when it judges the chat done (stripped

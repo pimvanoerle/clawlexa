@@ -29,6 +29,19 @@ def test_submit_then_next_returns_transcript():
     assert asyncio.run(run()) == "hello world"
 
 
+def test_next_utterance_coalesces_backlog():
+    """Utterances that piled up while the agent was busy are drained + combined
+    into one, so the agent answers recent speech, not a stale backlog."""
+    async def run():
+        hub = Hub(FakeTTS(), send_wav=None)
+        await hub.submit_utterance("first thing")
+        await hub.submit_utterance("second thing")
+        await hub.submit_utterance("third")
+        return await hub.next_utterance(timeout=1)
+
+    assert asyncio.run(run()) == "first thing second thing third"
+
+
 def test_next_utterance_times_out():
     async def run():
         hub = Hub(FakeTTS(), send_wav=None)

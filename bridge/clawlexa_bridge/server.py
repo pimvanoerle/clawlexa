@@ -8,7 +8,9 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import re
 import wave
+from collections import Counter
 
 import websockets
 
@@ -29,6 +31,19 @@ PLAY_CHUNK_BYTES = 1024
 def reply_text(transcript: str) -> str:
     """The phrase the bridge speaks back for a given transcript (3b loopback)."""
     return f"You said: {transcript}"
+
+
+def looks_like_noise(text: str) -> bool:
+    """True for transcripts that are almost certainly STT hallucination on
+    silence/echo rather than real speech — chiefly the "yeah yeah yeah…" style
+    where one short word dominates the whole utterance. Conservative: genuine
+    speech isn't mostly a single repeated token, and short utterances (which might
+    be a real "bye" or "yes") are always let through."""
+    words = re.findall(r"[a-z']+", text.lower())
+    if len(words) < 4:
+        return False  # too short to judge as repetition
+    _, count = Counter(words).most_common(1)[0]
+    return count / len(words) >= 0.5
 
 
 async def send_wav(ws, path: str) -> None:
@@ -66,6 +81,9 @@ async def _handle_utterance(ws, pcm: bytes, rate: int,
     text = await asyncio.to_thread(stt.transcribe, path)
     if not text.strip():  # silence/noise/our own echo tail — nothing to say back
         log.info("utterance had no speech; skipping")
+        return False
+    if looks_like_noise(text):  # STT hallucination on echo/noise — don't queue it
+        log.info("utterance looks like noise (%r); skipping", text[:48])
         return False
     log.info('you said: "%s"', text)
     if conv is not None:  # a real transcript: the agent now owes a reply

@@ -46,11 +46,24 @@ class Hub:
 
     # --- MCP agent side ------------------------------------------------------
     async def next_utterance(self, timeout: float | None = None) -> str:
-        """Block until the user speaks (after the wake word). Raises
-        asyncio.TimeoutError if `timeout` (seconds) elapses first."""
+        """Block until the user speaks, then drain any utterances that piled up
+        while the agent was busy and coalesce them into one — so the agent answers
+        what was *just* said rather than working through a growing backlog of stale
+        snippets (SPEC §7). Raises asyncio.TimeoutError if `timeout` (seconds)
+        elapses before the first utterance."""
         if timeout is not None:
-            return await asyncio.wait_for(self._utterances.get(), timeout)
-        return await self._utterances.get()
+            first = await asyncio.wait_for(self._utterances.get(), timeout)
+        else:
+            first = await self._utterances.get()
+        parts = [first]
+        while True:  # sweep up everything else already waiting
+            try:
+                parts.append(self._utterances.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        if len(parts) > 1:
+            log.info("coalesced %d backlogged utterances", len(parts))
+        return " ".join(p.strip() for p in parts if p.strip())
 
     async def speak(self, text: str) -> None:
         """Synthesize `text`, play it on the device, and return once it has
