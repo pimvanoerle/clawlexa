@@ -137,7 +137,9 @@ mic ─▶ ring buffer ─▶ wake-word model ─▶ (on trigger) ─▶ stream 
 - Wake word runs on-device, audio only leaves the device after it fires.
 - STT and TTS run on the bridge (CPU/GPU is free there; keeps firmware lean).
 - Half-duplex for v1 (no barge-in while clawlexa is speaking). Full-duplex
-  with echo cancellation is a stretch goal.
+  with echo cancellation is a stretch goal. A wake opens a **multi-turn
+  conversation window** (see §7): the user can take several turns without
+  repeating the wake word; the bridge ends the conversation on silence.
 - Device audio I/O is **16 kHz / 16-bit mono PCM** over I²S. The 1.85C has **no
   I²C codec** (the Waveshare demo's ES8311/ES7210 config is KORVO-derived and
   does not match this board): playback is a **PCM5101A** I²S DAC → NS8002 amp;
@@ -186,10 +188,37 @@ Candidates:
   end-to-end, then swap in the trained `clawlexa` model. The custom word is then
   just a file, not a blocker.
 - **Gating architecture.** The wake detector flips a small device-side state
-  machine LISTENING→STREAMING; the mic only streams a turn after the word fires,
-  and returns to LISTENING when the turn ends (the bridge's reply completes, or a
-  timeout). The transition logic is a pure, host-tested core (`wake_gate`); the
-  detector and the IO (start/stop streaming) are the swappable edges.
+  machine LISTENING→STREAMING; the mic only streams after the word fires,
+  and returns to LISTENING when the conversation ends. The transition logic is a
+  pure, host-tested core (`wake_gate`); the detector and the IO (start/stop
+  streaming) are the swappable edges.
+- **Multi-turn conversation window (Phase 6b).** A wake opens a *conversation*,
+  not a single turn: after the agent's reply plays, the mic keeps streaming for a
+  follow-up window (~12 s) so the user can continue without repeating the
+  wake word; silence past the window re-arms the wake detector (a spoken farewell
+  ends it immediately — see below). **Conversation
+  end is bridge-driven**, not device-driven — the bridge owns the VAD and sees
+  the agent's activity, so it decides when the conversation is idle and sends an
+  `end_turn` control frame; the device then stops streaming and returns to
+  wake-gated LISTENING. This keeps the firmware dumb (no on-device silence
+  timing) and makes the window logic Python/Layer-3-testable. The window
+  **pauses while the agent is thinking or speaking** — a pending reply never
+  times out into a re-arm (this also retires the old device-side 10 s no-reply
+  timeout, which was too short for a cold-start first turn); a longer safety
+  timeout covers an agent that never replies. The pure `wake_gate`
+  (LISTENING↔STREAMING) is unchanged; only the trigger for TURN_END moves from
+  device-side `play_end` to the bridge's `end_turn`. Utterances spoken while the
+  agent is thinking already queue on the bridge (`Hub._utterances`) and drain in
+  order — "fire off two thoughts" works without a re-wake. Barge-in (talking over
+  the reply) still needs AEC — deferred to Phase 8.
+- **Natural conversation end (goodbye).** Rather than always waiting out the
+  silence window, the conversation ends the moment it's clearly over: the agent
+  appends a `<end>` sentinel to its reply when it judges the chat done (stripped
+  before TTS), and the host also matches farewell phrases in the user's transcript
+  as a backstop. Either calls the `end_conversation` MCP tool →
+  `Conversation.end_now()` → the watchdog sends `end_turn` immediately, so after a
+  "bye" the device re-arms right after the farewell plays instead of sitting
+  attentive for the full window.
 
 ## 8. Display & touch
 
@@ -327,6 +356,14 @@ Nothing in here yet — created as each phase starts.
       dead-zone right after a reply — taps are dropped during the half-duplex
       mute tail (~300 ms past playback); fix is to queue the tap (don't clear the
       flag while muted) so it fires when the mute clears.
+- [~] **Phase 6b** — Conversation flow: a wake opens a multi-turn window so
+      follow-ups need no re-wake. Conversation end is **bridge-driven** (the
+      bridge sends `end_turn` after ~12 s of real silence, or immediately on a
+      goodbye — `<end>` sentinel from the agent or a farewell phrase from the
+      user; the window pauses while the agent is thinking/speaking). Think-time
+      utterances already queue on the bridge. `wake_gate` is unchanged — only the
+      TURN_END trigger moves from device `play_end` to the bridge `end_turn`.
+      Barge-in deferred to Phase 8.
 - [ ] **Phase 7** — Second-agent integration (ourclaw or Claude Desktop) to
       prove the MCP boundary is real.
 - [ ] **Phase 8+** — Stretch: barge-in, on-screen content from agent, IMU
