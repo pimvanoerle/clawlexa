@@ -208,6 +208,8 @@ class ClaudeSessionBrain(Brain):
                  memory_prompt: Optional[str] = None,
                  warm_prompt: Optional[str] = WARM_PROMPT,
                  cost_log: Optional[str] = None,
+                 model: Optional[str] = None,
+                 effort: Optional[str] = None,
                  permission_mode: str = "acceptEdits",
                  setting_sources: Sequence[str] = ("project", "user"),
                  client_factory: Optional[Callable[[], object]] = None) -> None:
@@ -218,6 +220,8 @@ class ClaudeSessionBrain(Brain):
         self._memory_prompt = memory_prompt
         self._warm_prompt = warm_prompt
         self._cost_log = cost_log
+        self._model = model      # None -> the CLI's default model
+        self._effort = effort    # None -> default; must stay unset on Haiku (errors)
         self._cost = CostMeter()  # process-lifetime token/cost tally
         self._permission_mode = permission_mode
         self._setting_sources = tuple(setting_sources)
@@ -226,13 +230,11 @@ class ClaudeSessionBrain(Brain):
         self._turns = 0  # turns this session, reset when the session closes
         self._lock = asyncio.Lock()  # serialise client use (reply vs bg idle-save)
 
-    def _default_factory(self):
-        try:
-            from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
-        except ImportError as e:  # optional dep — only needed for this brain
-            raise BrainError("claude-agent-sdk is not installed "
-                             "(pip install claude-agent-sdk)") from e
-        opts = ClaudeAgentOptions(
+    def _client_options(self) -> dict:
+        """The ClaudeAgentOptions kwargs. Pure (no SDK import) so it's host-testable.
+        `model`/`effort` are only included when set — Haiku errors on `effort`, so
+        it's left out by default."""
+        kwargs = dict(
             cwd=self._cwd,
             cli_path=self._cli_path,
             system_prompt={"type": "preset", "preset": "claude_code",
@@ -240,7 +242,19 @@ class ClaudeSessionBrain(Brain):
             setting_sources=list(self._setting_sources),
             permission_mode=self._permission_mode,
         )
-        return ClaudeSDKClient(options=opts)
+        if self._model:
+            kwargs["model"] = self._model     # e.g. claude-haiku-4-5 for a cheap voice brain
+        if self._effort:
+            kwargs["effort"] = self._effort   # only on models that support it (not Haiku)
+        return kwargs
+
+    def _default_factory(self):
+        try:
+            from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+        except ImportError as e:  # optional dep — only needed for this brain
+            raise BrainError("claude-agent-sdk is not installed "
+                             "(pip install claude-agent-sdk)") from e
+        return ClaudeSDKClient(options=ClaudeAgentOptions(**self._client_options()))
 
     async def _ensure(self) -> bool:
         """Open the session if needed. Returns True if this call connected a fresh
@@ -496,6 +510,13 @@ def main() -> None:
                         help="append per-turn token usage + cost to this CSV file "
                              "(for watching voice spend / comparing against Slack). "
                              "Per-turn cost is always logged to stderr regardless.")
+    parser.add_argument("--brain-model", default=None,
+                        help="model for the voice brain (e.g. claude-haiku-4-5 or "
+                             "claude-sonnet-4-6). Default: the Claude CLI's own default. "
+                             "Voice is light work, so a cheaper model cuts cost a lot.")
+    parser.add_argument("--effort", default=None,
+                        help="reasoning effort: low|medium|high|max. Lower = cheaper/faster. "
+                             "Only on Opus 4.5+/Sonnet 4.6 — leave unset for Haiku (it errors).")
     parser.add_argument("--host", default="0.0.0.0", help="device-link bind address")
     parser.add_argument("--port", type=int, default=8765, help="device-link port")
     args = parser.parse_args()
@@ -505,7 +526,8 @@ def main() -> None:
                         stream=sys.stderr)
     brain = ClaudeSessionBrain(cwd=args.brain_cwd, cli_path=args.claude_cli,
                                timeout=args.brain_timeout, memory_prompt=args.memory_prompt,
-                               warm_prompt=args.warm_prompt or None, cost_log=args.cost_log)
+                               warm_prompt=args.warm_prompt or None, cost_log=args.cost_log,
+                               model=args.brain_model, effort=args.effort)
     try:
         asyncio.run(_serve(brain, args.host, args.port, args.idle_timeout))
     except KeyboardInterrupt:

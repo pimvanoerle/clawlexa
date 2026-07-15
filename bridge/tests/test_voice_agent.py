@@ -257,6 +257,20 @@ def test_reply_tallies_cost_from_the_result_message():
     assert brain._cost.tokens["cache_read_input_tokens"] == 500
 
 
+def test_client_options_includes_model_and_effort_when_set():
+    b = ClaudeSessionBrain(model="claude-haiku-4-5", effort="low",
+                           client_factory=lambda: None)
+    opts = b._client_options()
+    assert opts["model"] == "claude-haiku-4-5"
+    assert opts["effort"] == "low"
+
+
+def test_client_options_omits_model_and_effort_when_unset():
+    b = ClaudeSessionBrain(client_factory=lambda: None)
+    opts = b._client_options()
+    assert "model" not in opts and "effort" not in opts  # Haiku errors on effort
+
+
 def test_warm_primes_a_fresh_session():
     """Pre-warm opens the session and sends the priming prompt once."""
     fc = FakeClient([[AssistantMessage([TextBlock("ready")])]])
