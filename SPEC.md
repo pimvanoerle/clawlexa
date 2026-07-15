@@ -65,8 +65,13 @@ behind clean interfaces.
   on the bridge. Control = JSON text frames; audio = raw binary frames.
 - **Wire audio codec: 16 kHz mono 16-bit PCM** for v1 (no device encoder,
   matches the mic/speaker pipeline, ~256 kbps is fine on a LAN). Opus later.
-- **Discovery: hardcoded** bridge host:port + WiFi creds via Kconfig for v1
-  (movable to NVS). mDNS auto-discovery and BT/SoftAP provisioning come later.
+- **Discovery: mDNS with a hardcoded fallback.** The bridge advertises an
+  `_clawlexa._tcp` service (Bonjour/zeroconf) and the device discovers it by
+  service type at boot — so the bridge's LAN IP can change without reflashing.
+  If discovery finds nothing (mDNS off, or `zeroconf` not installed on the host),
+  the device falls back to the Kconfig `BRIDGE_HOST:BRIDGE_PORT`. WiFi creds stay
+  in Kconfig for v1 (movable to NVS). Re-discovery happens on reboot (pairs with
+  the error-crab tap-to-restart, §7). BT/SoftAP provisioning comes later.
 - **Auth: trust the LAN** for v1. A shared secret in NVS comes later.
 
 **Open:**
@@ -388,7 +393,8 @@ A single list to make easy to triage; each links to its section above.
 
 - [x] ~~Device↔bridge transport~~ → WebSocket (binary frames) (§4)
 - [x] ~~Audio codec on wire~~ → 16 kHz mono PCM for v1; Opus later (§4)
-- [x] ~~Device discovery / pairing~~ → hardcoded via Kconfig for v1; mDNS later (§4)
+- [x] ~~Device discovery / pairing~~ → mDNS (`_clawlexa._tcp`) with a Kconfig
+      hardcoded fallback; WiFi creds still Kconfig; BT/SoftAP later (§4)
 - [ ] MCP push-notifications mechanism (§5)
 - [x] ~~STT engine default~~ → local `faster-whisper` (cloud later) (§6)
 - [x] ~~TTS engine default~~ → local `Piper` (cloud later) (§6)

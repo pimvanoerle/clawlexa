@@ -16,6 +16,7 @@ import websockets
 
 from .audio import AudioRecorder
 from .conversation import Conversation
+from .discovery import advertise
 from .protocol import (end_turn_message, parse_message, play_begin_message,
                        play_end_message, welcome_message)
 from .stt import STT, WhisperSTT
@@ -211,5 +212,8 @@ async def serve(host: str, port: int, stt: STT | None = None,
     handler = functools.partial(handle_connection, stt=stt, tts=tts, hub=hub,
                                 endpointer_factory=lambda rate: Endpointer(rate=rate, **ep_kwargs))
     log.info("clawlexa-bridge listening on ws://%s:%d", host, port)
-    async with websockets.serve(handler, host, port):
-        await asyncio.Future()  # run until cancelled
+    # Advertise over mDNS so the device can find us by service type, not a fixed
+    # IP (best-effort; the device falls back to its Kconfig BRIDGE_HOST).
+    with advertise(port):
+        async with websockets.serve(handler, host, port):
+            await asyncio.Future()  # run until cancelled

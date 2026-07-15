@@ -9,9 +9,11 @@
 #include "esp_check.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
+#include "mdns.h"
 
 #include "app_version.h"
 #include "audio.h"
@@ -145,13 +147,61 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data
     }
 }
 
+/* Discover the bridge over mDNS (_clawlexa._tcp). On success, writes the host
+ * into `host` and the port into `*port` and returns true; on any failure the
+ * caller falls back to the configured BRIDGE_HOST. Best-effort: a slow/missing
+ * responder just costs the query timeout at boot (re-run on reboot — pairs with
+ * tap-to-restart). */
+static bool discover_bridge(char *host, size_t host_len, int *port) {
+    static bool mdns_ready = false;
+    if (!mdns_ready) {
+        if (mdns_init() != ESP_OK) {
+            ESP_LOGW(TAG, "mdns init failed; using configured bridge host");
+            return false;
+        }
+        mdns_ready = true;
+        vTaskDelay(pdMS_TO_TICKS(500));  /* let the multicast-group join settle */
+    }
+    /* The first query right after joining the group often gets no answer, so
+     * retry a few times before giving up and falling back to the configured host. */
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        mdns_result_t *results = NULL;
+        esp_err_t err = mdns_query_ptr("_clawlexa", "_tcp", 3000, 4, &results);
+        if (err == ESP_OK && results != NULL) {
+            for (mdns_result_t *r = results; r != NULL; r = r->next) {
+                for (mdns_ip_addr_t *a = r->addr; a != NULL; a = a->next) {
+                    if (a->addr.type == ESP_IPADDR_TYPE_V4) {
+                        snprintf(host, host_len, IPSTR, IP2STR(&a->addr.u_addr.ip4));
+                        *port = r->port;
+                        mdns_query_results_free(results);
+                        ESP_LOGI(TAG, "mDNS: discovered bridge at %s:%d", host, *port);
+                        return true;
+                    }
+                }
+            }
+        }
+        if (results) {
+            mdns_query_results_free(results);
+        }
+        ESP_LOGI(TAG, "mDNS: query %d/3 found no bridge", attempt);
+    }
+    ESP_LOGI(TAG, "mDNS: no bridge advertised; using configured host");
+    return false;
+}
+
 esp_err_t ws_connect(void) {
-    ESP_RETURN_ON_FALSE(strlen(CONFIG_CLAWLEXA_BRIDGE_HOST) > 0, ESP_ERR_INVALID_STATE,
-                        TAG, "no bridge host configured (set it via menuconfig)");
+    /* Prefer an mDNS-discovered bridge; fall back to the Kconfig host. */
+    char host[64];
+    int port = CONFIG_CLAWLEXA_BRIDGE_PORT;
+    if (!discover_bridge(host, sizeof(host), &port)) {
+        snprintf(host, sizeof(host), "%s", CONFIG_CLAWLEXA_BRIDGE_HOST);
+        port = CONFIG_CLAWLEXA_BRIDGE_PORT;
+    }
+    ESP_RETURN_ON_FALSE(strlen(host) > 0, ESP_ERR_INVALID_STATE,
+                        TAG, "no bridge host (set BRIDGE_HOST or advertise via mDNS)");
 
     char uri[128];
-    snprintf(uri, sizeof(uri), "ws://%s:%d", CONFIG_CLAWLEXA_BRIDGE_HOST,
-             CONFIG_CLAWLEXA_BRIDGE_PORT);
+    snprintf(uri, sizeof(uri), "ws://%s:%d", host, port);
 
     const esp_websocket_client_config_t cfg = { .uri = uri };
     s_client = esp_websocket_client_init(&cfg);

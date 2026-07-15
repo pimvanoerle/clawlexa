@@ -17,5 +17,7 @@ dependencies:
   espressif/esp_lvgl_port: ^2.8.0
   espressif/esp_lcd_touch_cst816s: ^1.1.1
   espressif/esp_websocket_client: ^1.7.0
+  ## mDNS discovery of the bridge (_clawlexa._tcp); falls back to Kconfig host.
+  espressif/mdns: ^1.2.0
   ## Phase 4 wake word: TFLite-Micro runtime for the microWakeWord model.
   espressif/esp-tflite-micro: ^1.3.7
