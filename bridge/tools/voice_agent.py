@@ -106,6 +106,70 @@ def is_farewell(text: str) -> bool:
     return bool(_FAREWELL_RE.search(text))
 
 
+# --- token / cost tracking --------------------------------------------------
+class CostMeter:
+    """Running token + cost tally for the voice path, so we can watch spend and
+    compare it against the Slack path. `total_cost_usd` comes straight from the
+    Agent SDK's per-turn ResultMessage (the Claude Code CLI computes it,
+    cache-aware); `usage` carries the token breakdown. Pure / host-tested; process
+    lifetime totals (survives warm-session resets)."""
+
+    # Fields the CLI reports under ResultMessage.usage.
+    TOKENS = ("input_tokens", "output_tokens",
+              "cache_read_input_tokens", "cache_creation_input_tokens")
+
+    def __init__(self) -> None:
+        self.turns = 0
+        self.cost_usd = 0.0
+        self.tokens = {k: 0 for k in self.TOKENS}
+
+    def record(self, usage: Optional[dict], cost_usd: Optional[float]) -> str:
+        """Fold in one turn's usage/cost; return a one-line summary of THIS turn."""
+        u = usage or {}
+        this = {k: int(u.get(k, 0) or 0) for k in self.TOKENS}
+        cost = float(cost_usd or 0.0)
+        self.turns += 1
+        self.cost_usd += cost
+        for k in self.TOKENS:
+            self.tokens[k] += this[k]
+        return self._fmt(this, cost)
+
+    def totals_line(self) -> str:
+        return "session total: %d turns, %s" % (
+            self.turns, self._fmt(self.tokens, self.cost_usd))
+
+    @staticmethod
+    def _fmt(tok: dict, cost: float) -> str:
+        return ("in=%d out=%d cache_r=%d cache_w=%d $%.4f" % (
+            tok["input_tokens"], tok["output_tokens"],
+            tok["cache_read_input_tokens"], tok["cache_creation_input_tokens"], cost))
+
+
+def append_cost_row(path: str, label: str, usage: Optional[dict],
+                    cost_usd: Optional[float]) -> None:
+    """Append one turn's usage/cost to a CSV (created with a header) for later
+    analysis / voice-vs-Slack comparison. Best-effort — never breaks a reply."""
+    import csv
+    import os
+    from datetime import datetime, timezone
+    u = usage or {}
+    new = not os.path.exists(path)
+    try:
+        with open(path, "a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["ts", "label", "input", "output",
+                            "cache_read", "cache_write", "cost_usd"])
+            w.writerow([datetime.now(timezone.utc).isoformat(), label,
+                        int(u.get("input_tokens", 0) or 0),
+                        int(u.get("output_tokens", 0) or 0),
+                        int(u.get("cache_read_input_tokens", 0) or 0),
+                        int(u.get("cache_creation_input_tokens", 0) or 0),
+                        float(cost_usd or 0.0)])
+    except OSError as e:
+        log.warning("cost-log write failed (%s): %s", path, e)
+
+
 class BrainError(RuntimeError):
     """The brain failed to produce a reply (couldn't start, errored, timed out)."""
 
@@ -143,6 +207,7 @@ class ClaudeSessionBrain(Brain):
                  system_prompt: str = VOICE_SYSTEM_PROMPT, timeout: float = 120.0,
                  memory_prompt: Optional[str] = None,
                  warm_prompt: Optional[str] = WARM_PROMPT,
+                 cost_log: Optional[str] = None,
                  permission_mode: str = "acceptEdits",
                  setting_sources: Sequence[str] = ("project", "user"),
                  client_factory: Optional[Callable[[], object]] = None) -> None:
@@ -152,6 +217,8 @@ class ClaudeSessionBrain(Brain):
         self._timeout = timeout
         self._memory_prompt = memory_prompt
         self._warm_prompt = warm_prompt
+        self._cost_log = cost_log
+        self._cost = CostMeter()  # process-lifetime token/cost tally
         self._permission_mode = permission_mode
         self._setting_sources = tuple(setting_sources)
         self._client_factory = client_factory or self._default_factory
@@ -185,18 +252,28 @@ class ClaudeSessionBrain(Brain):
             return True
         return False
 
-    async def _drain(self) -> str:
+    async def _drain(self, label: str = "turn") -> str:
         """Collect the assistant's spoken text from one response; raise BrainError
-        if the model reports an error (auth/billing/etc.)."""
+        if the model reports an error (auth/billing/etc.). The trailing
+        ResultMessage carries this turn's token usage + cost, which we log and
+        tally (`label` distinguishes reply / warm / memory turns)."""
         parts = []
         async for msg in self._client.receive_response():
-            if type(msg).__name__ == "AssistantMessage":
+            tn = type(msg).__name__
+            if tn == "AssistantMessage":
                 err = getattr(msg, "error", None)
                 if err:
                     raise BrainError(f"brain error: {err}")
                 for block in getattr(msg, "content", None) or []:
                     if type(block).__name__ == "TextBlock":
                         parts.append(getattr(block, "text", ""))
+            elif tn == "ResultMessage":
+                usage = getattr(msg, "usage", None)
+                cost = getattr(msg, "total_cost_usd", None)
+                log.info("cost[%s]: %s | %s", label,
+                         self._cost.record(usage, cost), self._cost.totals_line())
+                if self._cost_log:
+                    append_cost_row(self._cost_log, label, usage, cost)
         return "".join(parts).strip()
 
     async def warm(self) -> None:
@@ -212,7 +289,7 @@ class ClaudeSessionBrain(Brain):
             if fresh and self._warm_prompt:  # prime only a newly-opened session
                 try:
                     await asyncio.wait_for(self._client.query(self._warm_prompt), self._timeout)
-                    ready = await asyncio.wait_for(self._drain(), self._timeout)
+                    ready = await asyncio.wait_for(self._drain("warm"), self._timeout)
                     log.info("session primed (%r)", ready[:40])
                 except Exception as e:  # connection is up; don't block on a prime miss
                     log.warning("pre-warm priming failed (continuing): %s", e)
@@ -240,7 +317,7 @@ class ClaudeSessionBrain(Brain):
                         "{date}", date.today().strftime("%Y_%m_%d"))
                     log.info("saving voice session memory (%d turns)...", self._turns)
                     await asyncio.wait_for(self._client.query(prompt), self._timeout)
-                    await asyncio.wait_for(self._drain(), self._timeout)
+                    await asyncio.wait_for(self._drain("memory"), self._timeout)
             except Exception as e:
                 log.warning("memory save failed: %s", e)
             finally:
@@ -306,9 +383,11 @@ async def run_voice_loop(io: VoiceIO, brain: Brain, *, idle_timeout_s: float = 1
     """Drive the device voice loop through `brain`. The brain is pre-warmed at
     startup so turn one isn't a cold start, and its session stays warm across turns
     *and across conversations* — a goodbye ends the device turn, not the session.
-    After `idle_timeout_s` of silence the session is reset in the background:
-    `end_session` saves a memory checkpoint and closes it, then it's re-warmed for
-    next time. Set `idle_timeout_s` <= 0 to never idle-reset. A brain failure is
+    After `idle_timeout_s` of silence the session is closed in the background:
+    `end_session` saves a memory checkpoint and drops the warm session (it is NOT
+    re-primed — that re-writes the vault context to cache and burns credits on an
+    unused session; the next wake reconnects lazily). Set `idle_timeout_s` <= 0 to
+    never idle-reset. A brain failure is
     handled per-turn (error crab + spoken apology) so one bad turn doesn't kill the
     loop. `max_turns` (for tests) stops after that many utterances; any background
     resets are awaited before returning."""
@@ -331,10 +410,13 @@ async def run_voice_loop(io: VoiceIO, brain: Brain, *, idle_timeout_s: float = 1
     while max_turns is None or turn < max_turns:
         text = await io.wait_for_utterance(timeout)
         if not text:
-            # Long idle: checkpoint memory and refresh the warm session in the
-            # background, so a wake right at the timeout isn't blocked (the brain
-            # serialises the save against the next reply).
-            spawn(_reset_session(brain))
+            # Long idle: checkpoint memory + close the session in the background
+            # (so a wake right at the timeout isn't blocked; the brain serialises
+            # the save against the next reply). We deliberately do NOT re-prime
+            # here — priming re-writes the whole vault context to cache (~$0.23 a
+            # pop), and re-priming on every idle tick burns credits on a session
+            # nobody may use. The next real wake reconnects lazily instead.
+            spawn(brain.end_session())
             continue
         turn += 1
         log.info("heard: %r", text)
@@ -361,15 +443,8 @@ async def run_voice_loop(io: VoiceIO, brain: Brain, *, idle_timeout_s: float = 1
         await io.speak(reply)
         if over:
             await io.end_conversation()
-    if bg:  # let any in-flight idle reset (memory save + re-warm) finish
+    if bg:  # let any in-flight idle memory-save finish
         await asyncio.gather(*bg, return_exceptions=True)
-
-
-async def _reset_session(brain: Brain) -> None:
-    """Idle reset: save a memory checkpoint (this closes the session) then pre-warm
-    a fresh one, so the next conversation is both persisted and still warm."""
-    await brain.end_session()
-    await brain.warm()
 
 
 async def _serve(brain: Brain, host: str, port: int, idle_timeout_s: float) -> None:
@@ -417,6 +492,10 @@ def main() -> None:
                         help="sent once when a session opens (pre-warm), before anyone "
                              "speaks: warms the model and has the agent load its persona "
                              "so turn one is fast and in character. Set '' to disable.")
+    parser.add_argument("--cost-log", default=None,
+                        help="append per-turn token usage + cost to this CSV file "
+                             "(for watching voice spend / comparing against Slack). "
+                             "Per-turn cost is always logged to stderr regardless.")
     parser.add_argument("--host", default="0.0.0.0", help="device-link bind address")
     parser.add_argument("--port", type=int, default=8765, help="device-link port")
     args = parser.parse_args()
@@ -426,7 +505,7 @@ def main() -> None:
                         stream=sys.stderr)
     brain = ClaudeSessionBrain(cwd=args.brain_cwd, cli_path=args.claude_cli,
                                timeout=args.brain_timeout, memory_prompt=args.memory_prompt,
-                               warm_prompt=args.warm_prompt or None)
+                               warm_prompt=args.warm_prompt or None, cost_log=args.cost_log)
     try:
         asyncio.run(_serve(brain, args.host, args.port, args.idle_timeout))
     except KeyboardInterrupt:

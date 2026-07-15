@@ -14,6 +14,7 @@ from tools.voice_agent import (
     Brain,
     BrainError,
     ClaudeSessionBrain,
+    CostMeter,
     VoiceIO,
     is_farewell,
     run_voice_loop,
@@ -77,6 +78,13 @@ class AssistantMessage:
     def __init__(self, content, error=None):
         self.content = content
         self.error = error
+
+
+# Duck type matched by _drain via class name — carries per-turn usage + cost.
+class ResultMessage:
+    def __init__(self, usage=None, total_cost_usd=None):
+        self.usage = usage
+        self.total_cost_usd = total_cost_usd
 
 
 class FakeClient:
@@ -213,6 +221,40 @@ def test_brain_keeps_one_warm_session_across_turns():
     assert asyncio.run(run()) == ("hi", "again")
     assert fc.connected == 1          # opened once, reused across turns
     assert fc.queries == ["one", "two"]
+
+
+# --- cost tracking ----------------------------------------------------------
+def test_cost_meter_accumulates():
+    m = CostMeter()
+    line = m.record({"input_tokens": 10, "output_tokens": 5,
+                     "cache_read_input_tokens": 0, "cache_creation_input_tokens": 2}, 0.01)
+    assert "in=10 out=5 cache_r=0 cache_w=2 $0.0100" == line
+    m.record({"input_tokens": 20, "output_tokens": 5}, 0.02)  # missing cache keys -> 0
+    assert m.turns == 2
+    assert m.tokens["input_tokens"] == 30 and m.tokens["output_tokens"] == 10
+    assert abs(m.cost_usd - 0.03) < 1e-9
+    assert "2 turns" in m.totals_line() and "$0.0300" in m.totals_line()
+
+
+def test_cost_meter_handles_missing_usage_and_cost():
+    m = CostMeter()
+    m.record(None, None)  # a turn with no usage/cost -> zeros, no crash
+    assert m.turns == 1 and m.cost_usd == 0.0
+
+
+def test_reply_tallies_cost_from_the_result_message():
+    fc = FakeClient([[AssistantMessage([TextBlock("hi")]),
+                      ResultMessage(usage={"input_tokens": 100, "output_tokens": 20,
+                                           "cache_read_input_tokens": 500,
+                                           "cache_creation_input_tokens": 0},
+                                    total_cost_usd=0.0123)]])
+    brain = ClaudeSessionBrain(client_factory=lambda: fc)
+
+    assert asyncio.run(brain.reply("hello")) == "hi"  # text still returned
+    assert brain._cost.turns == 1
+    assert abs(brain._cost.cost_usd - 0.0123) < 1e-9
+    assert brain._cost.tokens["input_tokens"] == 100
+    assert brain._cost.tokens["cache_read_input_tokens"] == 500
 
 
 def test_warm_primes_a_fresh_session():
