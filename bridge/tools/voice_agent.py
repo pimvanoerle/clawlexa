@@ -42,9 +42,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import re
 import sys
 import time
+
+# Run as a script (`python tools/voice_agent.py`), Python puts *tools/* on
+# sys.path — not the bridge dir — so `clawlexa_bridge` wouldn't import. The
+# bridge is spawned as a subprocess (`-m clawlexa_bridge`, which resolves via
+# its cwd), but the presence code imports the package directly, in-process.
+_BRIDGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _BRIDGE_DIR not in sys.path:
+    sys.path.insert(0, _BRIDGE_DIR)
 from abc import ABC, abstractmethod
 from datetime import date
 from typing import Callable, Optional, Sequence
@@ -486,6 +495,16 @@ async def greet_on_arrival(io: VoiceIO, source, policy, activity: Activity, *,
             activity.touch()
         except Exception as exc:  # device unplugged, bridge restarting, ...
             log.warning("presence greeting failed (%s) — skipping it", exc)
+            # We set "speaking" above, and in this path nothing else ever clears
+            # it: the device only returns to idle when a conversation *ends*, and
+            # if speak/listen failed no conversation ever began. Without this the
+            # crab sits looking like it's talking until the next wake. Best
+            # effort — if the device is truly gone this fails too, and the
+            # firmware's link-down handling takes over.
+            try:
+                await io.set_state("idle")
+            except Exception:
+                pass
         greeted += 1
         if max_greetings is not None and greeted >= max_greetings:
             return

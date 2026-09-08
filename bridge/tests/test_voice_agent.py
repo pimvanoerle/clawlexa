@@ -7,6 +7,7 @@ Claude Agent SDK session. Follows the repo convention of driving the event loop
 with asyncio.run.
 """
 import asyncio
+import sys
 
 import pytest
 
@@ -440,7 +441,7 @@ def test_no_greeting_while_a_conversation_is_live():
 
 def test_greeting_survives_a_device_that_is_not_there():
     """Unplugged device / restarting bridge: log it and carry on, don't crash
-    the voice driver."""
+    the voice driver. (The display tidy-up on this path is covered below.)"""
     io, sensor, policy, activity, _ = greet_setup([True, False, True])
 
     async def boom(text):
@@ -505,3 +506,48 @@ def test_custom_greetings_reach_the_device():
     table = parse_greetings(["morning:Claws up, Pim."])
     asyncio.run(greet_on_arrival(io, sensor, policy, activity, greetings=table))
     assert io.spoken == ["Claws up, Pim."]
+
+
+def test_script_can_import_the_bridge_package_when_run_directly():
+    """Regression: run as a script, Python puts tools/ on sys.path rather than
+    the bridge dir, so `from clawlexa_bridge...` inside the presence code blew up
+    with ModuleNotFoundError at startup — invisible to these tests, which import
+    through pytest's rootdir. Drive the real entry point from an unrelated cwd
+    and require the failure to be the *argument* error, not an import one.
+    """
+    import subprocess
+    import pathlib
+
+    script = pathlib.Path(__file__).resolve().parents[1] / "tools" / "voice_agent.py"
+    proc = subprocess.run([sys.executable, str(script), "--greeting", "badbucket:x"],
+                          capture_output=True, text=True, cwd="/", timeout=60)
+    assert "ModuleNotFoundError" not in proc.stderr, proc.stderr[-2000:]
+    assert "unknown greeting time" in proc.stderr
+
+
+def test_failed_greeting_does_not_leave_the_speaking_crab_up():
+    """`speaking` is set before the clip plays. If speak/listen then fails, no
+    conversation ever opens — and it's the conversation *ending* that returns the
+    device to idle. So the failure path has to clear it, or the crab sits there
+    looking like it's talking until the next wake word."""
+    io, sensor, policy, activity, _ = greet_setup([True, False, True])
+
+    async def boom(text):
+        raise RuntimeError("no device connected")
+
+    io.speak = boom
+    asyncio.run(greet_on_arrival(io, sensor, policy, activity))
+    assert io.states == ["speaking", "idle"]
+
+
+def test_failed_greeting_survives_a_device_that_cannot_even_be_reset():
+    """If the device is entirely gone, the tidy-up set_state fails too — that
+    must not escape and kill the watcher."""
+    io, sensor, policy, activity, _ = greet_setup([True, False, True])
+
+    async def boom(*a):
+        raise RuntimeError("no device connected")
+
+    io.speak = boom
+    io.set_state = boom
+    asyncio.run(greet_on_arrival(io, sensor, policy, activity))  # must not raise
