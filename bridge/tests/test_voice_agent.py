@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from clawlexa_bridge.presence import GreetingPolicy
+from clawlexa_bridge.presence import DEFAULT_GREETINGS, GreetingPolicy
 from tools.voice_agent import (
     BRAIN_ERROR_REPLY,
     EMPTY_BRAIN_REPLY,
@@ -22,6 +22,7 @@ from tools.voice_agent import (
     VoiceIO,
     greet_on_arrival,
     is_farewell,
+    parse_greetings,
     parse_quiet_hours,
     run_voice_loop,
     strip_end_sentinel,
@@ -474,3 +475,33 @@ def test_parse_quiet_hours():
         parse_quiet_hours("late")
     with pytest.raises(ValueError):
         parse_quiet_hours("22-99")
+
+
+def test_parse_greetings_defaults_when_unset():
+    assert parse_greetings(None) is None
+    assert parse_greetings([]) is None
+
+
+def test_parse_greetings_overrides_only_the_times_you_name():
+    table = parse_greetings(["morning:Claws up.", "morning:Morning, Pim."])
+    assert table["morning"] == ("Claws up.", "Morning, Pim.")
+    # untouched times keep their built-in lines
+    assert table["evening"] == DEFAULT_GREETINGS["evening"]
+
+
+def test_parse_greetings_keeps_colons_in_the_text():
+    table = parse_greetings(["evening:Evening: still going?"])
+    assert table["evening"] == ("Evening: still going?",)
+
+
+def test_parse_greetings_rejects_bad_input():
+    for bad in (["nonsense"], ["morning:"], ["lunchtime:hello"]):
+        with pytest.raises(ValueError):
+            parse_greetings(bad)
+
+
+def test_custom_greetings_reach_the_device():
+    io, sensor, policy, activity, _ = greet_setup([True, False, True])
+    table = parse_greetings(["morning:Claws up, Pim."])
+    asyncio.run(greet_on_arrival(io, sensor, policy, activity, greetings=table))
+    assert io.spoken == ["Claws up, Pim."]

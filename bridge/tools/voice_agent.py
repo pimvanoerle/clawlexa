@@ -85,6 +85,34 @@ def parse_quiet_hours(spec: str) -> tuple[int, int]:
     return start, end
 
 
+def parse_greetings(specs) -> "Optional[dict]":
+    """Parse repeated `--greeting WHEN:TEXT` args into a greeting table.
+
+    WHEN is morning|afternoon|evening; repeat the flag for several lines and they
+    rotate. A time of day you don't mention keeps its built-in line, so you can
+    override just the mornings. Returns None when nothing was passed, meaning
+    "use the defaults" — the repo's lines stay generic (SPEC §2) and a
+    deployment with a persona supplies its own.
+    """
+    if not specs:
+        return None
+    from clawlexa_bridge.presence import DEFAULT_GREETINGS
+
+    custom: dict = {}
+    for spec in specs:
+        when, sep, line = spec.partition(":")
+        when = when.strip().lower()
+        if not sep or not line.strip():
+            raise ValueError(f"--greeting wants 'when:text', got {spec!r}")
+        if when not in DEFAULT_GREETINGS:
+            raise ValueError(f"unknown greeting time {when!r}; expected one of "
+                             f"{', '.join(sorted(DEFAULT_GREETINGS))}")
+        custom.setdefault(when, []).append(line.strip())
+    table = {k: tuple(v) for k, v in DEFAULT_GREETINGS.items()}
+    table.update({k: tuple(v) for k, v in custom.items()})
+    return table
+
+
 BRAIN_ERROR_REPLY = "Sorry, I hit a problem thinking about that."
 EMPTY_BRAIN_REPLY = "I didn't catch that — could you say it again?"
 
@@ -559,7 +587,7 @@ def build_presence(args) -> tuple:
 
 
 async def _serve(brain: Brain, host: str, port: int, idle_timeout_s: float,
-                 source=None, policy=None) -> None:
+                 source=None, policy=None, greetings=None) -> None:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -583,7 +611,8 @@ async def _serve(brain: Brain, host: str, port: int, idle_timeout_s: float,
             if source is not None:
                 log.info("watching for arrivals in the room")
                 tasks.append(asyncio.create_task(
-                    greet_on_arrival(io, source, policy, activity)))
+                    greet_on_arrival(io, source, policy, activity,
+                                     greetings=greetings)))
             try:
                 # Either task ending (or failing) ends the session; the greeting
                 # watcher reconnects internally, so it normally runs forever.
@@ -644,6 +673,12 @@ def main() -> None:
                         help="how long the room must have been empty before returning to "
                              "it earns a greeting (default: 30). Also the minimum gap "
                              "between two greetings.")
+    parser.add_argument("--greeting", action="append", default=None, metavar="WHEN:TEXT",
+                        help="a greeting line, e.g. --greeting \"morning:Morning, Pim.\" "
+                             "WHEN is morning|afternoon|evening. Repeat for several lines "
+                             "(they rotate); a time of day you don't mention keeps its "
+                             "built-in line. Use this to give the crab a persona without "
+                             "putting one in the repo.")
     parser.add_argument("--quiet-hours", default="22-8", metavar="START-END",
                         help="local-hour window with no greetings (default: 22-8). "
                              "Use '0-0' to greet around the clock.")
@@ -651,6 +686,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8765, help="device-link port")
     args = parser.parse_args()
     args.quiet_hours = parse_quiet_hours(args.quiet_hours)
+    greetings = parse_greetings(args.greeting)
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -662,7 +698,7 @@ def main() -> None:
     source, policy = build_presence(args)
     try:
         asyncio.run(_serve(brain, args.host, args.port, args.idle_timeout,
-                           source=source, policy=policy))
+                           source=source, policy=policy, greetings=greetings))
     except KeyboardInterrupt:
         pass
 

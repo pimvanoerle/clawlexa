@@ -70,6 +70,7 @@ Tuning:
 |------|---------|--------------|
 | `--away-minutes` | `30` | How long the room must have been empty to earn a greeting. Also the minimum gap between two greetings. |
 | `--quiet-hours` | `22-8` | Local-hour window with no greetings. `0-0` disables quiet hours. |
+| `--greeting` | built-in lines | `WHEN:TEXT` (WHEN = `morning`/`afternoon`/`evening`). Repeat for several lines; they rotate. A time of day you don't mention keeps its built-in line. Use it to give the device a persona without putting one in the repo. |
 
 ## Troubleshooting
 
