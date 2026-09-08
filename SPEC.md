@@ -110,9 +110,13 @@ polling tool):**
   `wait_for_utterance` resolves the server-push question below — the agent pulls
   rather than the server pushing. In MCP mode the device's transcript goes to the
   agent (no standalone echo); the agent replies via `speak`.
-- Deferred to later phases: `show`/`set_state` (need display states — Phase 6),
-  `listen`/`stop_speaking`, and the `touch`/`wake_detected`/`device_status`
-  events. HTTP/SSE transport (for a persistent multi-agent bridge) is a later option.
+- **`show`/`set_state`** (Phase 6) — a short line of text and the ambient status
+  indicator on the LCD.
+- **`listen()`** (Phase 6c) — open a listening window without a wake word: the
+  bridge sends a `start_turn` control frame and the device streams as though the
+  word had fired. Used by the presence greeting (§7a), but deliberately generic.
+- Deferred to later phases: `stop_speaking`, and the
+  `touch`/`wake_detected`/`device_status` events. HTTP/SSE transport (for a persistent multi-agent bridge) is a later option.
 
 **Open:**
 - MCP doesn't have a great story for *server-pushed* notifications to all
@@ -229,6 +233,57 @@ Candidates:
   `Conversation.end_now()` → the watchdog sends `end_turn` immediately, so after a
   "bye" the device re-arms right after the farewell plays instead of sitting
   attentive for the full window.
+
+## 7a. Ambient triggers — presence-driven greetings
+
+Everything up to here starts with the *user*: a wake word or a tap. An **ambient
+trigger** lets the room start the conversation instead. The first one: a presence
+sensor in the study — walk in after a real absence and clawlexa greets you and
+opens a listening window, so answering needs no wake word.
+
+**Decided (Phase 6c):**
+
+- **Source: Home Assistant, subscribed not polled.** The bridge opens HA's
+  WebSocket API (`/api/websocket`) with a long-lived access token and subscribes
+  to `state_changed` for one configured entity. Push, so the greeting lands as
+  you walk in rather than up to a poll interval later, and the decision logic
+  stays in this repo (Layer 3 testable) instead of being split into automation
+  YAML on the HA side. A `PresenceSource` interface keeps HA swappable — an HTTP
+  webhook from an HA automation, or a different home-automation system, drops in
+  behind the same interface, and tests use a fake.
+- **"After a while" is a policy, not a sensor reading.** `GreetingPolicy` is a
+  pure state machine with an injectable clock: the room must have been **clear
+  for ≥ 30 min** before an occupied edge counts as an *arrival*, and greetings are
+  suppressed during **quiet hours (22:00–08:00)**, while a conversation is already
+  open, and within a minimum gap of the last greeting (debounce for a flickering
+  or double-firing sensor). Same shape as `Conversation` — no IO — so "stepped out
+  for coffee, came back" is testable without a sensor or a device.
+- **The greeting is canned; the conversation is not.** A short, rotating,
+  time-of-day-aware line plays immediately from the bridge — no LLM, no cost, no
+  cold-start pause between the door and the hello. Only if the user actually
+  answers does the warm Claude session spin up and the normal voice loop take
+  over. Walking past the study fifty times a day must not cost fifty primed
+  sessions (see the voice-cost work in Phase 5b).
+- **Bridge-opened listening window (`start_turn`).** A new control frame: the
+  bridge tells the device to start streaming as though the wake word had fired.
+  This implements the `listen()` tool deferred in §5, and it is the only firmware
+  change the feature needs — `wake_gate` is untouched (a remote wake raises the
+  same `WAKE_EV_WAKE` as a local one), and the existing conversation window plus
+  `end_turn` re-arms the wake word by itself when nobody answers the greeting.
+- **Where the pieces live.** The reusable, testable halves — the policy and the
+  HA source — live in the bridge package (`presence.py`, `ha.py`); the wiring
+  (what to say, when to hand off to the brain) lives in the voice driver
+  (`tools/voice_agent.py`) with the rest of the agent-facing behavior. The MCP
+  surface gains only the generic `listen()` — no presence-specific tool — so
+  another agent isn't forced to adopt our greeting policy.
+
+**Open:**
+- Whether presence belongs on the MCP surface at all (e.g. a `wait_for_event`
+  that yields presence edges as well as utterances) so a *second* agent can react
+  to the room, or whether it stays a voice-driver concern. Deferred to Phase 7;
+  v1 keeps the MCP surface at the generic `listen()`.
+- Other ambient triggers (a calendar event, a doorbell, a long build finishing)
+  reuse the same shape. None are in scope for v1.
 
 ## 8. Display & touch
 
@@ -374,6 +429,13 @@ Nothing in here yet — created as each phase starts.
       utterances already queue on the bridge. `wake_gate` is unchanged — only the
       TURN_END trigger moves from device `play_end` to the bridge `end_turn`.
       Barge-in deferred to Phase 8.
+- [ ] **Phase 6c** — Ambient presence greeting (§7a): a Home Assistant presence
+      sensor in the study starts the conversation. The bridge subscribes to HA's
+      WebSocket API, a pure `GreetingPolicy` decides when an arrival is worth
+      greeting (clear ≥30 min, quiet hours 22:00–08:00, debounced, never over a
+      live conversation), and a canned time-of-day line plays before a
+      bridge-opened listening window (`start_turn`, the `listen()` tool) lets the
+      user answer with no wake word. The brain only wakes if they do.
 - [ ] **Phase 7** — Second-agent integration (ourclaw or Claude Desktop) to
       prove the MCP boundary is real.
 - [ ] **Phase 8+** — Stretch: barge-in, on-screen content from agent, IMU
@@ -399,6 +461,13 @@ A single list to make easy to triage; each links to its section above.
 - [x] ~~STT engine default~~ → local `faster-whisper` (cloud later) (§6)
 - [x] ~~TTS engine default~~ → local `Piper` (cloud later) (§6)
 - [x] ~~Endpointing~~ → server-side VAD on the bridge (§6)
+- [x] ~~Ambient trigger source~~ → Home Assistant WebSocket subscription, behind
+      a `PresenceSource` interface (§7a)
+- [x] ~~Greeting text~~ → canned, time-of-day; the brain wakes only if the user
+      answers (§7a)
+- [x] ~~Bridge-initiated listening~~ → `start_turn` control frame = the `listen()`
+      tool; `wake_gate` unchanged (§7a)
+- [ ] Presence on the MCP surface (a `wait_for_event`) vs voice-driver-only (§7a)
 - [ ] Wake-word engine: microWakeWord vs ESP-Skainet (§7)
 - [ ] Actual wake word phrase (§7)
 - [x] ~~On-device UI framework~~ → LVGL via `esp_lvgl_port` (§8)
