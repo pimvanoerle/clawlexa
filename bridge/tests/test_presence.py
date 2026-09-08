@@ -144,3 +144,45 @@ def test_greeting_for_accepts_a_custom_table():
     table = {"morning": ("clack",), "afternoon": ("clack",), "evening": ("snip",)}
     assert greeting_for(9, 0, table) == "clack"
     assert greeting_for(20, 7, table) == "snip"
+
+
+# --- why a reading was refused --------------------------------------------
+# A suppressed arrival is silent otherwise, and indistinguishable from a sensor
+# that never fired — which cost a whole round-trip to the study to work out.
+
+def test_reason_explains_a_too_short_absence():
+    pol, clk = make(away_s=30 * MIN)
+    pol.update(True)
+    assert not arrive_after(pol, clk, 5 * MIN)
+    assert "only away" in pol.reason and "300s" in pol.reason
+
+
+def test_reason_explains_the_non_edge_and_first_reading_cases():
+    pol, clk = make()
+    pol.update(True)
+    assert "first reading" in pol.reason
+    clk.advance(MIN)
+    pol.update(True)
+    assert "already occupied" in pol.reason
+
+
+def test_reason_explains_quiet_hours_and_busy():
+    pol, clk = make(quiet=(22, 8))
+    clk.hour = 23
+    pol.update(True)
+    assert not arrive_after(pol, clk, 31 * MIN)
+    assert "quiet hours" in pol.reason
+
+    pol2, clk2 = make()
+    pol2.update(True)
+    pol2.update(False)
+    clk2.advance(31 * MIN)
+    assert not pol2.update(True, busy=True)
+    assert "already live" in pol2.reason
+
+
+def test_reason_reports_a_successful_greeting():
+    pol, clk = make(away_s=30 * MIN)
+    pol.update(True)
+    assert arrive_after(pol, clk, 45 * MIN)
+    assert "greeting" in pol.reason and "45 min" in pol.reason

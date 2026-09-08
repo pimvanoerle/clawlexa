@@ -485,6 +485,10 @@ async def greet_on_arrival(io: VoiceIO, source, policy, activity: Activity, *,
     greeted = 0
     async for occupied in source.readings():
         if not policy.update(occupied, busy=activity.busy()):
+            # Say why. A suppressed arrival is otherwise indistinguishable from
+            # a sensor that never fired, and telling those apart after the fact
+            # means reconstructing the timeline from Home Assistant's history.
+            log.info("presence: %s", policy.reason)
             continue
         line = policy.greeting(greetings)
         log.info("presence: arrival -> greeting %r", line)

@@ -104,6 +104,17 @@ class GreetingPolicy:
         self._clear_since: Optional[float] = None
         self._last_greeting: Optional[float] = None
         self._greetings = 0
+        self._reason = "no readings yet"
+
+    @property
+    def reason(self) -> str:
+        """Why the last reading did or didn't earn a greeting, in words.
+
+        Worth its keep: without it a suppressed arrival is *silent*, and telling
+        "the sensor never fired" apart from "it fired and I declined" means going
+        to Home Assistant's own history to reconstruct the timeline.
+        """
+        return self._reason
 
     @property
     def greetings(self) -> int:
@@ -119,26 +130,42 @@ class GreetingPolicy:
         if not occupied:
             if was is not False:  # occupied -> clear (or first-ever reading)
                 self._clear_since = self._now()
+                self._reason = "room went clear; away clock started"
+            else:
+                self._reason = "still clear"
             return False
         if was is None:  # first reading is 'occupied': you were already here
+            self._reason = "first reading — can't know how long you'd been here"
             return False
         if was:  # still occupied — not an edge
+            self._reason = "already occupied — not an arrival"
             return False
         return self._arrived(busy)
 
     def _arrived(self, busy: bool) -> bool:
         """A clear -> occupied edge: apply the suppression rules."""
         now = self._now()
-        if self._clear_since is None or (now - self._clear_since) < self._away_s:
-            return False  # only stepped out for a moment
+        if self._clear_since is None:
+            self._reason = "arrival, but we never saw the room go clear"
+            return False
+        away = now - self._clear_since
+        if away < self._away_s:  # only stepped out for a moment
+            self._reason = (f"arrival, but only away {away:.0f}s "
+                            f"(need {self._away_s:.0f}s)")
+            return False
         if busy:
-            return False  # already talking; don't greet over it
+            self._reason = "arrival, but a conversation is already live"
+            return False
         if in_quiet_hours(self._hour(), *self._quiet):
+            self._reason = f"arrival, but it's quiet hours ({self._hour():02d}:00)"
             return False
         if self._last_greeting is not None and (now - self._last_greeting) < self._min_gap_s:
+            self._reason = (f"arrival, but last greeting was only "
+                            f"{now - self._last_greeting:.0f}s ago")
             return False
         self._last_greeting = now
         self._greetings += 1
+        self._reason = f"arrival after {away / 60:.0f} min away — greeting"
         return True
 
     def greeting(self, table: Optional[dict[str, Sequence[str]]] = None) -> str:
