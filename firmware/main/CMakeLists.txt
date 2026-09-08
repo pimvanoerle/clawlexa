@@ -13,6 +13,7 @@ idf_component_register(
         "touch_geom.c"
         "audio.c"
         "audio_tone.c"
+        "pcm_ring.c"
         "wav.c"
         "mic.c"
         "mic_sample.c"

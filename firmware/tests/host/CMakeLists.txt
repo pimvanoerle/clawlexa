@@ -135,6 +135,19 @@ target_link_libraries(test_wake_gate PRIVATE unity)
 add_test(NAME test_wake_gate COMMAND test_wake_gate)
 # -----------------------------------------------------------------------
 
+# --- test_pcm_ring ------------------------------------------------------
+# Pure SPSC PCM ring buffer (audio smoothing), no IDF/IO deps.
+add_executable(test_pcm_ring
+    test_pcm_ring.c
+    "${FIRMWARE_MAIN}/pcm_ring.c"
+)
+target_include_directories(test_pcm_ring PRIVATE
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_pcm_ring PRIVATE unity)
+add_test(NAME test_pcm_ring COMMAND test_pcm_ring)
+# -----------------------------------------------------------------------
+
 # --- test_display_sequence (tier T3: mocked-IO interaction test) ---------
 # Compiles the real display.c against fake IDF/component headers (fakes/) and
 # asserts the bring-up call sequence + variant selection with no hardware.

@@ -89,6 +89,13 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data
              * streaming and re-arm the wake word. A reply (play_end) no longer
              * ends the turn: the mic keeps streaming for follow-ups until the
              * bridge says stop, so a wake opens a whole conversation (SPEC §7). */
+            /* Bracket the clip for the playback buffer: play_begin arms it and
+             * drops anything stale, play_end lets it drain and report (SPEC §6). */
+            if (strstr(ctrl, "play_begin") != NULL) {
+                audio_play_begin();
+            } else if (strstr(ctrl, "play_end") != NULL) {
+                audio_play_end();
+            }
             if (strstr(ctrl, "end_turn") != NULL) {
                 s_turn_end = true;
             } else if (strstr(ctrl, "start_turn") != NULL) {
