@@ -436,6 +436,19 @@ Nothing in here yet — created as each phase starts.
       live conversation), and a canned time-of-day line plays before a
       bridge-opened listening window (`start_turn`, the `listen()` tool) lets the
       user answer with no wake word. The brain only wakes if they do.
+- [ ] **Phase 6d** — Tool-using voice turns: let the agent actually answer "where
+      are we with X" from its vault. Today the voice prompt forbids tool use to
+      keep replies fast, so the brain either guesses or (before the prompt fix)
+      promised to "go and look it up" and then ended the turn, leaving the device
+      to fall asleep on a waiting user. Needs a **holding line + a `working`
+      affordance** (a spoken "let me check" and a distinct crab, since a long
+      pause is indistinguishable from a hang), the conversation window held open
+      for the duration, and — the bulk of the work — the failure modes: the API
+      timing out, the network dropping mid-look-up, a turn that simply runs
+      forever, and the token budget running out part-way. Every one of those has
+      to end in the crab *saying something* and returning to a sane state, never
+      in silence. Cost matters too: tool turns are the expensive kind, and voice
+      turns already bill well above their logged tokens (see §10 open item).
 - [ ] **Phase 7** — Second-agent integration (ourclaw or Claude Desktop) to
       prove the MCP boundary is real.
 - [ ] **Phase 8+** — Stretch: barge-in, on-screen content from agent, IMU
@@ -468,6 +481,9 @@ A single list to make easy to triage; each links to its section above.
 - [x] ~~Bridge-initiated listening~~ → `start_turn` control frame = the `listen()`
       tool; `wake_gate` unchanged (§7a)
 - [ ] Presence on the MCP surface (a `wait_for_event`) vs voice-driver-only (§7a)
+- [ ] Whether a voice turn may use tools, and what the user hears while it does
+      (§12 Phase 6d). v1 forbids it: one utterance, one reply, no going away and
+      coming back.
 - [ ] Wake-word engine: microWakeWord vs ESP-Skainet (§7)
 - [ ] Actual wake word phrase (§7)
 - [x] ~~On-device UI framework~~ → LVGL via `esp_lvgl_port` (§8)

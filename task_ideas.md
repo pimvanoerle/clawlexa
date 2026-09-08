@@ -392,3 +392,31 @@ When a task is T5-only at face value, decompose it: list the device-free slices
   (arrival → spoken line → `listen()`); T2 `test_wake_gate.c::test_muted_queues_a_
   remote_start_turn` makes footgun (b) gradeable with no board. Only the physical
   "walk into the study" is T5.
+
+### VOICE-2 — Let a voice turn do real work without going silent
+- **Anchor:** after Phase 6c (the presence greeting), before Phase 7.
+- **Prompt:** "Asked 'where are we with the robot body project', the crab either
+  guesses or says it'll go and look — and then goes quiet and falls asleep. Let
+  it actually look things up, without the user ever being left listening to
+  nothing."
+- **Done-correctly:** the turn splits into *acknowledge -> work -> answer*. A
+  spoken holding line goes out immediately (the user must never wait on silence),
+  a distinct `working` display state replaces the ambiguous pause, and the
+  bridge's conversation window is held open for the duration instead of expiring
+  into `end_turn`. The reply timeout (`DEFAULT_REPLY_TIMEOUT_S`, 150 s) and the
+  driver's `--brain-timeout` (120 s) both currently sit *below* a realistic
+  tool-using turn — a model that misses this ships something that works on a fast
+  answer and re-arms the wake word mid-look-up on a slow one.
+- **Footguns:** (a) the silence problem is the whole exercise — every failure path
+  (API timeout, network drop mid-look-up, a turn that never returns, token budget
+  exhausted) must end in the crab *saying* something and returning to a sane
+  state; the tempting design catches the exception and logs it, leaving a user
+  staring at a crab that will never speak. (b) The two timeouts are in different
+  processes and must be ordered, or the bridge's safety net fires before the
+  agent's own error path can speak. (c) Cost: tool turns are the expensive kind,
+  and a "just let it use tools" implementation quietly multiplies the bill —
+  voice turns already charge well above their logged tokens.
+- **Device-free slices:** the acknowledge/work/answer sequencing and every
+  failure path are Layer-3 testable against a fake brain that hangs, raises, or
+  exhausts a budget (`tests/test_voice_agent.py` already fakes a brain); the
+  window-holding is a `Conversation` unit test. Only "does it sound right" is T5.
