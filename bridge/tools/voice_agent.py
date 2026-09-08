@@ -512,8 +512,15 @@ async def greet_on_arrival(io: VoiceIO, source, policy, activity: Activity, *,
     `max_greetings` (for tests) returns after that many greetings.
     """
     greeted = 0
-    async for occupied in source.readings():
-        if not policy.update(occupied, busy=activity.busy()):
+    async for reading in source.readings():
+        # Readings carry how long the sensor has held this state (nonzero only
+        # for the startup baseline), so a restart resumes a real absence instead
+        # of restarting the away clock. Plain bools are still accepted so a test
+        # fake can stay a list of True/False.
+        occupied, steady_for_s = (reading if isinstance(reading, tuple)
+                                  else (reading, 0.0))
+        if not policy.update(occupied, busy=activity.busy(),
+                             steady_for_s=steady_for_s):
             # Say why. A suppressed arrival is otherwise indistinguishable from
             # a sensor that never fired, and telling those apart after the fact
             # means reconstructing the timeline from Home Assistant's history.

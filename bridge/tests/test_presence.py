@@ -186,3 +186,36 @@ def test_reason_reports_a_successful_greeting():
     pol.update(True)
     assert arrive_after(pol, clk, 45 * MIN)
     assert "greeting" in pol.reason and "45 min" in pol.reason
+
+
+# --- resuming an absence across a restart -----------------------------------
+
+def test_restart_during_a_long_absence_still_greets():
+    """The bug this fixes: a deploy or crash-restart mid-absence used to reset
+    the away clock, silently swallowing the greeting owed on the return."""
+    pol, clk = make(away_s=30 * MIN)
+    # Fresh process. Home Assistant says the room has been clear for 40 minutes.
+    assert not pol.update(False, steady_for_s=40 * MIN)
+    assert "already clear for 40 min" in pol.reason
+    clk.advance(30)                      # walk in half a minute later
+    assert pol.update(True)              # ...and still get greeted
+
+
+def test_a_restart_does_not_invent_an_absence():
+    """The mirror case: if the room only just went clear, the restart must not
+    let a return 30 seconds later count as an arrival."""
+    pol, clk = make(away_s=30 * MIN)
+    assert not pol.update(False, steady_for_s=60)
+    clk.advance(30)
+    assert not pol.update(True)
+    assert "only away" in pol.reason
+
+
+def test_live_events_carry_no_accumulated_age():
+    """A normal event is heard as it happens, so the clock starts now."""
+    pol, clk = make(away_s=30 * MIN)
+    pol.update(True)
+    pol.update(False)                    # steady_for_s defaults to 0
+    assert "away clock started" in pol.reason
+    clk.advance(29 * MIN)
+    assert not pol.update(True)

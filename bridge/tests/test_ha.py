@@ -9,8 +9,10 @@ import json
 
 import pytest
 
-from clawlexa_bridge.ha import (HomeAssistantPresence, reading_from_event,
-                                reading_from_states, state_is_occupied,
+import datetime
+
+from clawlexa_bridge.ha import (HomeAssistantPresence, Reading, reading_from_event,
+                                reading_from_states, state_age_s, state_is_occupied,
                                 websocket_url)
 
 ENTITY = "binary_sensor.study_presence"
@@ -59,7 +61,7 @@ def test_reading_from_event_ignores_other_entities_and_event_types():
         return {"type": "event", "event": {"event_type": "state_changed",
                                            "data": {"entity_id": entity,
                                                     "new_state": {"state": state}}}}
-    assert reading_from_event(event(ENTITY, "on"), ENTITY) is True
+    assert reading_from_event(event(ENTITY, "on"), ENTITY) == Reading(True, 0.0)
     assert reading_from_event(event("light.kitchen", "on"), ENTITY) is None
     assert reading_from_event({"type": "result", "success": True}, ENTITY) is None
     assert reading_from_event({"type": "event", "event": {"event_type": "call_service"}},
@@ -69,9 +71,29 @@ def test_reading_from_event_ignores_other_entities_and_event_types():
 def test_reading_from_states_finds_the_entity():
     states = [{"entity_id": "light.kitchen", "state": "on"},
               {"entity_id": ENTITY, "state": "off"}]
-    assert reading_from_states(states, ENTITY) is False
+    assert reading_from_states(states, ENTITY).occupied is False
     assert reading_from_states(states, "binary_sensor.missing") is None
     assert reading_from_states("not a list", ENTITY) is None
+
+
+def test_baseline_reading_carries_how_long_the_state_has_held():
+    """The restart fix: HA knows the room has been clear for 40 minutes, so a
+    restart must resume that absence rather than start counting from zero."""
+    now = datetime.datetime(2026, 9, 8, 18, 0, tzinfo=datetime.timezone.utc)
+    states = [{"entity_id": ENTITY, "state": "off",
+               "last_changed": "2026-09-08T17:20:00+00:00"}]
+    r = reading_from_states(states, ENTITY, now=now)
+    assert r.occupied is False
+    assert r.steady_for_s == 40 * 60
+
+
+def test_state_age_is_robust_to_junk_and_clock_skew():
+    now = datetime.datetime(2026, 9, 8, 18, 0, tzinfo=datetime.timezone.utc)
+    assert state_age_s(None, now) == 0.0
+    assert state_age_s("not a timestamp", now) == 0.0
+    # A future timestamp (clock skew against the HA host) must not back-date the
+    # away clock, which would fake an absence that never happened.
+    assert state_age_s("2026-09-08T19:00:00+00:00", now) == 0.0
 
 
 # --- the handshake, against a fake socket -----------------------------------
@@ -132,7 +154,7 @@ def test_session_authenticates_then_subscribes():
          "result": [{"entity_id": ENTITY, "state": "off"}]},
         event(ENTITY, "on"),
     ], n=2)
-    assert readings == [False, True]           # baseline, then the arrival
+    assert [r.occupied for r in readings] == [False, True]  # baseline, then arrival
     assert ws.sent[0]["type"] == "auth"        # token goes out first
     assert ws.sent[0]["access_token"] == "tok"
     assert [m["type"] for m in ws.sent[1:]] == ["get_states", "subscribe_events"]
@@ -161,7 +183,7 @@ def test_session_ignores_traffic_for_other_entities():
         event("sensor.study_temperature", "21"),
         event(ENTITY, "on"),
     ], n=2)
-    assert readings == [False, True]
+    assert [r.occupied for r in readings] == [False, True]
 
 
 def test_missing_entity_yields_no_baseline_but_keeps_running():
@@ -172,4 +194,4 @@ def test_missing_entity_yields_no_baseline_but_keeps_running():
         {"type": "result", "id": 1, "success": True, "result": []},
         event(ENTITY, "on"),
     ], n=1)
-    assert readings == [True]
+    assert [r.occupied for r in readings] == [True]

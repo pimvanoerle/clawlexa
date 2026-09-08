@@ -23,7 +23,8 @@ import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, Callable, Optional, Sequence
+from datetime import datetime, timezone
+from typing import Any, AsyncIterator, Callable, NamedTuple, Optional, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 log = logging.getLogger("clawlexa.presence")
@@ -37,6 +38,18 @@ DEFAULT_RECONNECT_S = 5.0
 DEFAULT_TOKEN_PATH = "~/.config/ha-token"
 
 
+class Reading(NamedTuple):
+    """One presence observation.
+
+    `steady_for_s` is how long the entity had already been in this state when we
+    learned of it: 0 for a live event (we heard it as it happened), but the real
+    age for the baseline read at startup, so a restart doesn't reset the away
+    clock and swallow the greeting owed on a return from a long absence.
+    """
+    occupied: bool
+    steady_for_s: float = 0.0
+
+
 class PresenceSource(ABC):
     """Anything that can tell us whether a room is occupied over time.
 
@@ -46,8 +59,8 @@ class PresenceSource(ABC):
     """
 
     @abstractmethod
-    def readings(self) -> AsyncIterator[bool]:
-        """Yield True (occupied) / False (clear), starting with current state."""
+    def readings(self) -> AsyncIterator[Reading]:
+        """Yield readings, starting with the entity's current state."""
         raise NotImplementedError
 
 
@@ -102,18 +115,40 @@ def reading_from_event(msg: dict[str, Any], entity_id: str,
     if data.get("entity_id") != entity_id:
         return None
     new_state = data.get("new_state") or {}
-    return state_is_occupied(new_state.get("state"), occupied_states)
+    occupied = state_is_occupied(new_state.get("state"), occupied_states)
+    # A live event: we heard it as it happened, so no accumulated age.
+    return None if occupied is None else Reading(occupied)
 
 
 def reading_from_states(states: Any, entity_id: str,
-                        occupied_states: Sequence[str] = OCCUPIED_STATES) -> Optional[bool]:
-    """Find our entity in a `get_states` result and read its current state."""
+                        occupied_states: Sequence[str] = OCCUPIED_STATES,
+                        now: Optional[datetime] = None) -> Optional[Reading]:
+    """Find our entity in a `get_states` result and read its current state,
+    including how long it has held it (from Home Assistant's `last_changed`)."""
     if not isinstance(states, list):
         return None
     for st in states:
         if isinstance(st, dict) and st.get("entity_id") == entity_id:
-            return state_is_occupied(st.get("state"), occupied_states)
+            occupied = state_is_occupied(st.get("state"), occupied_states)
+            if occupied is None:
+                return None
+            return Reading(occupied, state_age_s(st.get("last_changed"), now))
     return None
+
+
+def state_age_s(last_changed: Optional[str], now: Optional[datetime] = None) -> float:
+    """Seconds since an HA `last_changed` timestamp, or 0.0 if it's unusable.
+    Never negative — a clock skewed against the HA host must not back-date the
+    away clock into the future."""
+    if not last_changed:
+        return 0.0
+    try:
+        then = datetime.fromisoformat(last_changed.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return 0.0
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    return max(0.0, ((now or datetime.now(timezone.utc)) - then).total_seconds())
 
 
 def read_token(path: str) -> str:
@@ -149,7 +184,7 @@ class HomeAssistantPresence(PresenceSource):
         # Redacted host:port for logs — the token must never appear in one.
         self._where = urlsplit(self._url).netloc
 
-    async def readings(self) -> AsyncIterator[bool]:
+    async def readings(self) -> AsyncIterator[Reading]:
         while True:
             try:
                 async for reading in self._session():
@@ -163,7 +198,7 @@ class HomeAssistantPresence(PresenceSource):
                 log.info("Home Assistant closed the connection; reconnecting")
             await asyncio.sleep(self._reconnect_s)
 
-    async def _session(self) -> AsyncIterator[bool]:
+    async def _session(self) -> AsyncIterator[Reading]:
         connect = self._connect
         if connect is None:
             import websockets
@@ -185,6 +220,9 @@ class HomeAssistantPresence(PresenceSource):
                         log.warning("entity %s not found (or unavailable) in Home "
                                     "Assistant — check the entity id", self._entity_id)
                     else:
+                        log.info("baseline: %s, unchanged for %.0f min",
+                                 "occupied" if initial.occupied else "clear",
+                                 initial.steady_for_s / 60)
                         yield initial
                     continue
                 if msg.get("type") == "result" and not msg.get("success", True):

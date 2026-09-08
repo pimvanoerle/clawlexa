@@ -122,15 +122,29 @@ class GreetingPolicy:
         index for `greeting_for`."""
         return self._greetings
 
-    def update(self, occupied: bool, *, busy: bool = False) -> bool:
+    def update(self, occupied: bool, *, busy: bool = False,
+               steady_for_s: float = 0.0) -> bool:
         """Feed one presence reading. `busy` = a conversation is already live.
-        Returns True if the caller should greet now."""
+
+        `steady_for_s` is how long the sensor had *already* been in this state
+        when we heard about it — nonzero only for the baseline read at startup,
+        where the source knows from Home Assistant's `last_changed`. Without it a
+        restart resets the away clock to zero and throws away a real absence: a
+        deploy or a crash-restart during a long absence would silently swallow
+        the greeting you were owed on your return.
+
+        Returns True if the caller should greet now.
+        """
         was = self._occupied
         self._occupied = occupied
         if not occupied:
             if was is not False:  # occupied -> clear (or first-ever reading)
-                self._clear_since = self._now()
-                self._reason = "room went clear; away clock started"
+                self._clear_since = self._now() - steady_for_s
+                self._reason = (
+                    "room went clear; away clock started"
+                    if steady_for_s <= 0 else
+                    f"room already clear for {steady_for_s / 60:.0f} min; "
+                    f"away clock resumed")
             else:
                 self._reason = "still clear"
             return False
