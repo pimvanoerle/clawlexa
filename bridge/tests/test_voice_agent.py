@@ -635,3 +635,43 @@ def test_reconciled_turn_stays_out_of_the_log(caplog):
                       "cache_read_input_tokens": 17673,
                       "cache_creation_input_tokens": 6800}, 0.0104723)
     assert "raw usage" not in caplog.text
+
+
+# --- result-message logging (chasing the cost gap) ---------------------------
+
+class FakeResult:
+    """Stands in for the SDK's ResultMessage."""
+    def __init__(self, **kw):
+        self.usage = {"input_tokens": 1}
+        self.total_cost_usd = 0.05
+        self.result = "the spoken reply, which must not be logged"
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+def test_describe_result_names_the_model_that_served_the_turn():
+    from tools.voice_agent import describe_result
+    out = describe_result(FakeResult(
+        model_usage={"claude-haiku-4-5": {"costUSD": 0.0104}}, num_turns=1))
+    assert "claude-haiku-4-5" in out and "num_turns" in out
+
+
+def test_describe_result_surfaces_fields_we_did_not_anticipate():
+    """A field that only exists on some SDK versions shouldn't hide from us."""
+    from tools.voice_agent import describe_result
+    out = describe_result(FakeResult(some_new_field="surprise"))
+    assert "some_new_field" in out and "surprise" in out
+
+
+def test_describe_result_omits_the_reply_text_and_the_fields_already_logged():
+    from tools.voice_agent import describe_result
+    out = describe_result(FakeResult(model="claude-haiku-4-5"))
+    assert "must not be logged" not in out       # the reply itself
+    assert "total_cost_usd" not in out           # already on the cost line
+    assert "input_tokens" not in out             # ditto
+
+
+def test_describe_result_survives_an_unserialisable_field():
+    from tools.voice_agent import describe_result
+    out = describe_result(FakeResult(weird=object()))
+    assert "weird" in out

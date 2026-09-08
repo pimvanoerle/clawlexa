@@ -245,6 +245,42 @@ class CostMeter:
             tok["cache_read_input_tokens"], tok["cache_creation_input_tokens"], cost))
 
 
+# Fields on the SDK's ResultMessage worth seeing while we chase the cost gap. The
+# turn's own `usage` says one cheap cached iteration, yet the bill is ~16x that,
+# and a direct `claude -p` call reconciles to the cent — so the discrepancy is
+# somewhere on the session path. `model_usage` names the model that actually
+# served the turn, which is the next thing to rule in or out.
+RESULT_FIELDS = ("model_usage", "modelUsage", "model", "num_turns", "subtype",
+                 "duration_ms", "duration_api_ms", "is_error", "session_id",
+                 "permission_denials", "service_tier", "speed", "fast_mode_state")
+
+
+def describe_result(msg) -> str:
+    """One line of whatever the ResultMessage will tell us, skipping the fields
+    we already log and the reply text. Deliberately broad while the cost gap is
+    unexplained — it is free (the object is already in hand) and can be trimmed
+    once the cause is known."""
+    import json as _json
+    seen = {}
+    for f in RESULT_FIELDS:
+        v = getattr(msg, f, None)
+        if v not in (None, [], {}, ""):
+            seen[f] = v
+    # Anything else public we haven't thought to name, so a field that only
+    # exists on some SDK versions can't hide from us.
+    for f in sorted(vars(msg)) if hasattr(msg, "__dict__") else []:
+        if (not f.startswith("_") and f not in seen
+                and f not in ("usage", "total_cost_usd", "result")):
+            v = getattr(msg, f, None)
+            if v not in (None, [], {}, ""):
+                seen.setdefault(f, v)
+    try:
+        out = _json.dumps(seen, default=str, sort_keys=True)
+    except Exception:
+        out = repr(seen)
+    return out[:1200] + ("…" if len(out) > 1200 else "")
+
+
 def append_cost_row(path: str, label: str, usage: Optional[dict],
                     cost_usd: Optional[float]) -> None:
     """Append one turn's usage/cost to a CSV (created with a header) for later
@@ -386,6 +422,7 @@ class ClaudeSessionBrain(Brain):
                 cost = getattr(msg, "total_cost_usd", None)
                 log.info("cost[%s]: %s | %s", label,
                          self._cost.record(usage, cost), self._cost.totals_line())
+                log.info("result[%s]: %s", label, describe_result(msg))
                 if self._cost_log:
                     append_cost_row(self._cost_log, label, usage, cost)
         return "".join(parts).strip()
