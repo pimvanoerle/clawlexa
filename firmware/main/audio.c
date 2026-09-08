@@ -29,7 +29,17 @@ static const char *TAG = "audio";
  * mute tail. */
 #define PLAY_PREROLL_SAMPLES  (AUDIO_SAMPLE_RATE * 300 / 1000)
 #define PLAY_CHUNK_SAMPLES 512
-#define PLAY_FULL_WAIT_MS  10
+
+/* Poll delay for the playback task, in TICKS — never milliseconds.
+ *
+ * pdMS_TO_TICKS rounds *down*, and at CONFIG_FREERTOS_HZ=100 anything under
+ * 10 ms becomes zero. vTaskDelay(0) does not block, so a poll loop written as
+ * pdMS_TO_TICKS(5) spins at priority 6 and starves everything below it — it
+ * tripped the task watchdog 318 times and stole enough CPU from the mic task to
+ * put drops in the *inbound* audio while fixing the outbound. One tick minimum,
+ * always. */
+#define PLAY_POLL_TICKS    (pdMS_TO_TICKS(10) > 0 ? pdMS_TO_TICKS(10) : 1)
+_Static_assert(PLAY_POLL_TICKS > 0, "playback poll must block for at least one tick");
 
 static i2s_chan_handle_t s_tx;
 static pcm_ring_t s_ring;
@@ -140,7 +150,7 @@ esp_err_t audio_play_pcm(const int16_t *samples, size_t n_samples) {
         samples += took;
         n_samples -= took;
         if (n_samples > 0) {
-            vTaskDelay(pdMS_TO_TICKS(PLAY_FULL_WAIT_MS));
+            vTaskDelay(PLAY_POLL_TICKS);
         }
     }
     return ESP_OK;
@@ -156,7 +166,7 @@ static void audio_play_task(void *arg) {
     while (1) {
         if (!s_draining) {
             started = false;
-            vTaskDelay(pdMS_TO_TICKS(5));
+            vTaskDelay(PLAY_POLL_TICKS);
             continue;
         }
         size_t level = pcm_ring_level(&s_ring);
@@ -164,7 +174,7 @@ static void audio_play_task(void *arg) {
             /* Wait for a cushion — unless the clip is already complete and
              * shorter than the pre-roll, in which case just play it. */
             if (level < PLAY_PREROLL_SAMPLES && s_clip_open) {
-                vTaskDelay(pdMS_TO_TICKS(5));
+                vTaskDelay(PLAY_POLL_TICKS);
                 continue;
             }
             started = true;
@@ -188,7 +198,7 @@ static void audio_play_task(void *arg) {
             /* Mid-clip and nothing to play: the DMA is draining toward silence.
              * This is the gap, counted. */
             s_stats.underruns++;
-            vTaskDelay(pdMS_TO_TICKS(5));
+            vTaskDelay(PLAY_POLL_TICKS);
             continue;
         }
         size_t written = 0;
