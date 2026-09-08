@@ -566,7 +566,8 @@ def test_cost_line_stays_quiet_when_tokens_explain_the_bill():
                          "cache_read_input_tokens": 17673,
                          "cache_creation_input_tokens": 6800,
                          "iterations": [{}]}, 0.0104723)
-    assert "UNACCOUNTED" not in line and "iters=" not in line
+    assert "UNACCOUNTED" not in line
+    assert "iters=1" in line   # always reported now, so a missing count is visible
 
 
 def test_cost_line_flags_a_turn_its_tokens_cannot_explain():
@@ -610,3 +611,27 @@ def test_voice_prompt_forbids_promising_to_go_and_look_things_up():
     assert "this reply is the whole turn" in p
     assert "cannot go away" in p
     assert "never say" in p
+
+
+def test_unreconciled_turn_dumps_the_raw_usage(caplog):
+    """When the headline fields don't explain the bill, the answer is in a field
+    we aren't reading — so log the whole payload, but only for turns that don't
+    reconcile, so a healthy log stays quiet."""
+    import logging
+    meter = CostMeter()
+    with caplog.at_level(logging.INFO, logger="clawlexa.voice"):
+        meter.record({"input_tokens": 10, "output_tokens": 99,
+                      "cache_read_input_tokens": 30060,
+                      "cache_creation_input_tokens": 58,
+                      "service_tier": "standard"}, 0.0940)
+    assert "raw usage" in caplog.text and "service_tier" in caplog.text
+
+
+def test_reconciled_turn_stays_out_of_the_log(caplog):
+    import logging
+    meter = CostMeter()
+    with caplog.at_level(logging.INFO, logger="clawlexa.voice"):
+        meter.record({"input_tokens": 10, "output_tokens": 39,
+                      "cache_read_input_tokens": 17673,
+                      "cache_creation_input_tokens": 6800}, 0.0104723)
+    assert "raw usage" not in caplog.text

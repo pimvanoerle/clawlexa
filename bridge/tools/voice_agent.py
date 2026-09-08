@@ -215,12 +215,23 @@ class CostMeter:
         n = len(iters) if isinstance(iters, list) else None
         implied = sum(tokens[k] * cls.RATES[k] for k in cls.TOKENS)
         bits = []
-        if n is not None and n != 1:
-            bits.append("iters=%d" % n)
+        bits.append("iters=%s" % (n if n is not None else "absent"))
         # A ratio near 1.0 means the logged tokens explain the bill.
-        if implied > 0 and cost > 0 and cost / implied >= 1.5:
+        unexplained = implied > 0 and cost > 0 and cost / implied >= 1.5
+        if unexplained:
             bits.append("UNACCOUNTED %.1fx (logged tokens imply $%.4f)"
                         % (cost / implied, implied))
+            # Dump what the SDK actually handed us. The headline fields don't add
+            # up, so the answer is in a field we aren't reading — a second cache
+            # write, a per-iteration breakdown, a service tier. Only on turns
+            # that don't reconcile, so it can't spam a healthy log.
+            try:
+                import json as _json
+                raw = _json.dumps(usage, default=str, sort_keys=True)
+            except Exception:
+                raw = repr(usage)
+            log.info("unreconciled turn, raw usage: %s",
+                     raw[:900] + ("…" if len(raw) > 900 else ""))
         return ("  [%s]" % " ".join(bits)) if bits else ""
 
     def totals_line(self) -> str:
