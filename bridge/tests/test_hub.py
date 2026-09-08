@@ -150,3 +150,30 @@ def test_set_state_without_device_raises():
             return "raised"
 
     assert asyncio.run(run()) == "raised"
+
+
+def test_listen_sends_start_turn_to_the_device():
+    """`listen()` opens a window with no wake word (SPEC §7a) — the device does
+    the rest, so all the Hub owes is the frame."""
+    async def run():
+        ws = FakeWS()
+        hub = Hub(FakeTTS(), send_wav=None)
+        hub.attach(ws, Conversation())
+        await hub.listen()
+        return ws.sent
+
+    sent = asyncio.run(run())
+    assert [json.loads(f)["type"] for f in sent] == ["start_turn"]
+
+
+def test_listen_without_a_device_raises():
+    async def run():
+        hub = Hub(FakeTTS(), send_wav=None)
+        await hub.listen()
+
+    try:
+        asyncio.run(run())
+    except RuntimeError as exc:
+        assert "no device connected" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError with no device attached")

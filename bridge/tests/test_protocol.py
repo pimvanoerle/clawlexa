@@ -8,6 +8,7 @@ from clawlexa_bridge.protocol import (
     parse_message,
     play_begin_message,
     play_end_message,
+    start_turn_message,
     welcome_message,
 )
 
@@ -75,3 +76,12 @@ def test_parse_rejects_non_object():
 def test_parse_rejects_missing_type():
     with pytest.raises(ValueError):
         parse_message('{"device": "clawlexa"}')
+
+
+def test_start_turn_message_is_parseable_and_distinct_from_end_turn():
+    """The device tells the two apart with a substring match, so make sure
+    neither frame contains the other's keyword."""
+    frame = start_turn_message()
+    assert json.loads(frame) == {"type": "start_turn"}
+    assert "end_turn" not in frame
+    assert "start_turn" not in end_turn_message()

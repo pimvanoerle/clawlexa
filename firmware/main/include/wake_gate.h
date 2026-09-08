@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdbool.h>
+
 /* Wake-gate state machine (pure, host-tested) — the core of Phase 4 / 6b.
  *
  * The device idles in LISTENING: the wake detector is armed and the mic is NOT
@@ -35,3 +37,29 @@ typedef enum {
 
 /* The next state given the current state and an event. Pure / no IO. */
 wake_state_t wake_gate_next(wake_state_t state, wake_event_t event);
+
+/* What opens a conversation from LISTENING on a given tick (pure, host-tested).
+ *
+ * Three things can open one: the wake word, a screen tap (push-to-talk), and —
+ * since Phase 6c — the bridge, via a `start_turn` control frame (SPEC §7a: the
+ * `listen()` tool, used by the presence greeting). They differ in what happens
+ * when the mic is muted because our own reply is still playing:
+ *
+ *   - a tap is *dropped* (the mic is deaf anyway, and the user is most likely
+ *     reacting to what they just heard);
+ *   - a remote start_turn is *queued* — it fires as soon as the mute clears.
+ *     The bridge typically sends it right after a clip it just spoke ("hi, I'm
+ *     listening"), so it lands squarely in the mute tail; dropping it there
+ *     would mean the greeting opens a window that never opens.
+ *
+ * The caller passes the pending flags rather than consuming them, and clears
+ * exactly the ones `consume_*` names — that's what keeps the queueing decision
+ * here, in a testable function, instead of in the mic task's control flow. */
+typedef struct {
+    bool open;            /* start streaming a conversation this tick */
+    bool consume_tap;     /* clear the pending-tap flag */
+    bool consume_remote;  /* clear the pending remote-wake flag */
+} wake_trigger_t;
+
+wake_trigger_t wake_trigger_eval(bool muted, bool wake_fired,
+                                 bool tap_pending, bool remote_pending);

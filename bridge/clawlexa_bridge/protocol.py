@@ -46,6 +46,15 @@ def end_turn_message() -> str:
     return json.dumps({"type": "end_turn"})
 
 
+def start_turn_message() -> str:
+    """Tell the device to open a listening window *without* a wake word — start
+    streaming as though the word had fired. This is the `listen()` tool of SPEC
+    §5, used by ambient triggers like the presence greeting (§7a). The device
+    queues it across the mute tail of a clip we just spoke, and the usual
+    conversation window / `end_turn` path closes it again if nobody answers."""
+    return json.dumps({"type": "start_turn"})
+
+
 # The device's ambient status indicator (SPEC §8). Agent-driven via set_state.
 DISPLAY_STATES = ("idle", "listening", "thinking", "speaking", "error")
 

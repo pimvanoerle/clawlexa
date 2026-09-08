@@ -54,6 +54,15 @@ def build_mcp(hub: Hub) -> FastMCP:
         return "ok"
 
     @mcp.tool()
+    async def listen() -> str:
+        """Open a listening window on the device without waiting for its wake
+        word — the device starts streaming as if the word had fired. Use it after
+        speaking unprompted (an ambient greeting, a question you asked) so the
+        user can just answer. The window closes itself on silence."""
+        await hub.listen()
+        return "ok"
+
+    @mcp.tool()
     async def set_state(state: str) -> str:
         """Set the device's ambient status indicator. One of:
         idle | listening | thinking | speaking | error."""

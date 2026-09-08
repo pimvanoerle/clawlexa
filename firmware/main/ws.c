@@ -40,6 +40,7 @@ static volatile bool s_turn_end;  /* set on end_turn: the bridge ended the conve
 static volatile bool s_streaming;  /* true while a wake-triggered conversation is open */
 static volatile int s_send_fails;  /* consecutive mic-send failures (zombie-socket detection) */
 static volatile bool s_tap_pending;  /* set by ws_on_tap() from the touch task */
+static volatile bool s_remote_wake;  /* set on start_turn: the bridge wants a listening window */
 
 void ws_on_tap(void) {
     s_tap_pending = true;
@@ -90,6 +91,12 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data
              * bridge says stop, so a wake opens a whole conversation (SPEC §7). */
             if (strstr(ctrl, "end_turn") != NULL) {
                 s_turn_end = true;
+            } else if (strstr(ctrl, "start_turn") != NULL) {
+                /* The bridge wants a listening window without a wake word — an
+                 * ambient trigger like the presence greeting (SPEC §7a). The mic
+                 * task picks this up like a wake; it survives the mute tail of a
+                 * clip we just spoke (see wake_trigger_eval). */
+                s_remote_wake = true;
             } else if (strstr(ctrl, "play_end") != NULL && s_streaming) {
                 /* Reply finished playing mid-conversation: the follow-up window
                  * is open, so show the attentive (listening) crab — we're waiting
@@ -278,16 +285,21 @@ static void mic_stream_task(void *arg) {
         }
 
         if (state == WAKE_LISTENING) {
-            /* Don't react to our own reply still draining from the speaker. */
-            if (mic_gate_muted(s_mute_until_us, now)) {
-                take_tap();  /* ignore a stray tap while our reply plays */
-                continue;
+            /* Three things open a conversation: the wake word, a tap
+             * (push-to-talk), and the bridge's start_turn (SPEC §7a). While our
+             * own reply is still draining from the speaker we detect nothing;
+             * wake_trigger_eval owns which pending trigger survives that mute. */
+            bool muted = mic_gate_muted(s_mute_until_us, now);
+            bool woke = !muted && wake_detector_feed(buf, (size_t) got);
+            wake_trigger_t tr = wake_trigger_eval(muted, woke, s_tap_pending,
+                                                  s_remote_wake);
+            if (tr.consume_tap) {
+                s_tap_pending = false;
             }
-            bool woke = wake_detector_feed(buf, (size_t) got);
-            if (take_tap()) {  /* a screen tap is push-to-talk */
-                woke = true;
+            if (tr.consume_remote) {
+                s_remote_wake = false;
             }
-            if (woke && s_connected) {
+            if (tr.open && s_connected) {
                 ESP_LOGI(TAG, "wake -> streaming a conversation");
                 state = wake_gate_next(state, WAKE_EV_WAKE);
                 s_turn_end = false;
@@ -323,6 +335,7 @@ static void mic_stream_task(void *arg) {
             esp_websocket_client_send_text(s_client, end, strlen(end), portMAX_DELAY);
             state = wake_gate_next(state, WAKE_EV_TURN_END);
             s_streaming = false;
+            s_remote_wake = false;  /* a start_turn during the conversation is moot */
             display_set_state("idle");  /* conversation over — back to the idle crab */
         }
     }

@@ -12,7 +12,7 @@ import logging
 import wave
 from typing import Awaitable, Callable
 
-from .protocol import set_state_message, show_message
+from .protocol import set_state_message, show_message, start_turn_message
 from .tts import TTS
 
 log = logging.getLogger("clawlexa.bridge")
@@ -90,6 +90,14 @@ class Hub:
         if self._conv is not None:
             self._conv.end_now()
         log.info("end_conversation requested by agent")
+
+    async def listen(self) -> None:
+        """Open a listening window on the device without a wake word (SPEC §7a).
+        The device starts streaming; its `audio_begin` opens the conversation on
+        this side, so nothing else is needed here. If nobody speaks, the normal
+        follow-up window times out and the device re-arms its wake word."""
+        await self._require_ws().send(start_turn_message())
+        log.info("listen: opened a window on the device (start_turn)")
 
     async def set_state(self, state: str) -> None:
         """Set the device's ambient status indicator (SPEC §8)."""
