@@ -306,6 +306,11 @@ static const char *crab_face(const char *state) {
 }
 
 void display_set_state(const char *state) {
+    /* Log every transition: the crab's mood is otherwise invisible to anything
+     * but a human looking at the screen, which makes it untestable at Layer 2
+     * and unverifiable when the device is in another room (SPEC §10a: on-device
+     * tests assert observable behaviour). */
+    ESP_LOGI(TAG, "display: state -> %s", state);
     const lv_image_dsc_t *icon = crab_icon(state);
     if (icon == NULL) {
         /* No bitmap for this state: ASCII crab + word on the state colour. */
