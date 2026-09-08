@@ -31,6 +31,46 @@ laptop's LAN IP, e.g. `192.168.1.221`.
 `tests/test_protocol.py` covers the pure message encode/parse; `test_server.py`
 runs the real handshake over a loopback WebSocket (no device needed).
 
+## Ambient presence greeting (Phase 6c)
+
+The voice driver can greet you when you walk into a room, using a Home Assistant
+presence sensor — no wake word needed to answer (SPEC §7a).
+
+```bash
+.venv/bin/python tools/voice_agent.py \
+    --brain-cwd ~/claude --claude-cli ./node_modules/.bin/claude \
+    --ha-url http://homeassistant.local:8123 \
+    --ha-entity binary_sensor.study_presence
+```
+
+It needs a Home Assistant **long-lived access token** (Profile → Security →
+Long-lived access tokens) in a file — `~/.config/ha-token` by default,
+`--ha-token-file` to point elsewhere. The token is read at startup and never
+logged. Omit `--ha-url`/`--ha-entity` and the device stays wake-word only.
+
+To find your entity id:
+
+```bash
+curl -s -H "Authorization: Bearer $(cat ~/.config/ha-token)" \
+    http://homeassistant.local:8123/api/states |
+  python3 -c "import json,sys; [print(s['entity_id'], '=', s['state']) for s in json.load(sys.stdin) if 'presence' in s['entity_id']]"
+```
+
+When the room goes from clear to occupied — and it has been clear for
+`--away-minutes` (default 30), outside `--quiet-hours` (default `22-8`), with no
+conversation already running — the device speaks a canned time-of-day greeting
+and opens a listening window. **The greeting never wakes the Claude session**:
+walking past the study costs nothing. Only if you answer does the brain start,
+via the normal voice loop. If you don't, the usual follow-up window times out and
+the wake word re-arms.
+
+Tuning:
+
+| Flag | Default | What it does |
+|------|---------|--------------|
+| `--away-minutes` | `30` | How long the room must have been empty to earn a greeting. Also the minimum gap between two greetings. |
+| `--quiet-hours` | `22-8` | Local-hour window with no greetings. `0-0` disables quiet hours. |
+
 ## Troubleshooting
 
 **Device connects but the link fails (bridge logs `400 Bad Request`; device logs

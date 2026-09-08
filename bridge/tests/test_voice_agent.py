@@ -8,15 +8,21 @@ with asyncio.run.
 """
 import asyncio
 
+import pytest
+
+from clawlexa_bridge.presence import GreetingPolicy
 from tools.voice_agent import (
     BRAIN_ERROR_REPLY,
     EMPTY_BRAIN_REPLY,
+    Activity,
     Brain,
     BrainError,
     ClaudeSessionBrain,
     CostMeter,
     VoiceIO,
+    greet_on_arrival,
     is_farewell,
+    parse_quiet_hours,
     run_voice_loop,
     strip_end_sentinel,
 )
@@ -30,6 +36,7 @@ class FakeVoiceIO(VoiceIO):
         self.spoken = []
         self.shown = []
         self.ended_conversations = 0
+        self.listens = 0
 
     async def wait_for_utterance(self, timeout_s=None):
         return self._utterances.pop(0) if self._utterances else ""
@@ -45,6 +52,9 @@ class FakeVoiceIO(VoiceIO):
 
     async def end_conversation(self):
         self.ended_conversations += 1
+
+    async def listen(self):
+        self.listens += 1
 
 
 class FakeBrain(Brain):
@@ -362,3 +372,105 @@ def test_factory_failure_surfaces_as_brainerror():
             return str(e)
 
     assert "not installed" in asyncio.run(run())
+
+
+# --- ambient presence greeting (SPEC §7a) ------------------------------------
+class FakeSensor:
+    """A presence source that replays a canned list of readings."""
+
+    def __init__(self, readings):
+        self._readings = list(readings)
+
+    async def readings(self):
+        for r in self._readings:
+            yield r
+
+
+class GreetClock:
+    def __init__(self):
+        self.t = 0.0
+        self.hour = 10
+
+    def __call__(self):
+        return self.t
+
+    def advance(self, dt):
+        self.t += dt
+
+
+def greet_setup(readings, away_s=60.0, window_s=20.0):
+    clk = GreetClock()
+    io = FakeVoiceIO([])
+    policy = GreetingPolicy(away_s=away_s, min_gap_s=away_s, quiet_start_h=22,
+                            quiet_end_h=8, now=clk, hour=lambda: clk.hour)
+    activity = Activity(window_s=window_s, now=clk)
+    # The sensor's readings are separated by a jump on the fake clock, so
+    # "cleared, then came back 10 minutes later" costs no real time.
+    class Timed(FakeSensor):
+        async def readings(self):
+            for r in self._readings:
+                clk.advance(10 * 60)
+                yield r
+    return io, Timed(readings), policy, activity, clk
+
+
+def test_arrival_speaks_then_opens_a_listening_window():
+    """The whole point: a canned hello, then a window so the user can answer
+    without a wake word — and no brain involved at all."""
+    io, sensor, policy, activity, _ = greet_setup([True, False, True])
+    asyncio.run(greet_on_arrival(io, sensor, policy, activity))
+    assert len(io.spoken) == 1
+    assert io.spoken[0] in ("Morning! I'm here if you need me.",
+                            "Morning. Good to see you.",
+                            "Hey, morning. Ready when you are.")
+    assert io.listens == 1
+    assert io.states == ["speaking"]
+
+
+def test_no_greeting_while_a_conversation_is_live():
+    # A busy window wide enough to still be open when the sensor fires, since
+    # the fake clock jumps 10 minutes per reading.
+    io, sensor, policy, activity, _ = greet_setup([True, False, True],
+                                                  window_s=60 * 60)
+    activity.touch()  # mid-conversation when the arrival lands
+    asyncio.run(greet_on_arrival(io, sensor, policy, activity))
+    assert io.spoken == [] and io.listens == 0
+
+
+def test_greeting_survives_a_device_that_is_not_there():
+    """Unplugged device / restarting bridge: log it and carry on, don't crash
+    the voice driver."""
+    io, sensor, policy, activity, _ = greet_setup([True, False, True])
+
+    async def boom(text):
+        raise RuntimeError("no device connected")
+
+    io.speak = boom
+    asyncio.run(greet_on_arrival(io, sensor, policy, activity))
+    assert io.listens == 0  # we never got as far as opening the window
+
+
+def test_short_absence_is_not_an_arrival():
+    io, sensor, policy, activity, _ = greet_setup([True, False, True],
+                                                  away_s=60 * 60)
+    asyncio.run(greet_on_arrival(io, sensor, policy, activity))
+    assert io.spoken == []
+
+
+def test_activity_window_expires():
+    clk = GreetClock()
+    act = Activity(window_s=20.0, now=clk)
+    assert not act.busy()          # nothing has happened yet
+    act.touch()
+    assert act.busy()
+    clk.advance(21)
+    assert not act.busy()
+
+
+def test_parse_quiet_hours():
+    assert parse_quiet_hours("22-8") == (22, 8)
+    assert parse_quiet_hours("0-0") == (0, 0)
+    with pytest.raises(ValueError):
+        parse_quiet_hours("late")
+    with pytest.raises(ValueError):
+        parse_quiet_hours("22-99")

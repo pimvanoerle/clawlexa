@@ -44,6 +44,7 @@ import asyncio
 import logging
 import re
 import sys
+import time
 from abc import ABC, abstractmethod
 from datetime import date
 from typing import Callable, Optional, Sequence
@@ -68,6 +69,22 @@ VOICE_SYSTEM_PROMPT = (
     "before playback; it tells the device the chat is over so it can stop "
     "listening. Only add it when you're genuinely wrapping up."
 )
+# Where a Home Assistant long-lived token lives by default (never logged).
+DEFAULT_TOKEN_PATH = "~/.config/ha-token"
+
+
+def parse_quiet_hours(spec: str) -> tuple[int, int]:
+    """Parse a '22-8' quiet-hours window into (start, end) local hours. Equal
+    values mean no quiet hours at all."""
+    try:
+        start, end = (int(p) for p in spec.split("-", 1))
+    except ValueError:
+        raise ValueError(f"quiet hours must look like '22-8', got {spec!r}") from None
+    if not (0 <= start <= 23 and 0 <= end <= 23):
+        raise ValueError(f"quiet hours must be 0-23, got {spec!r}")
+    return start, end
+
+
 BRAIN_ERROR_REPLY = "Sorry, I hit a problem thinking about that."
 EMPTY_BRAIN_REPLY = "I didn't catch that — could you say it again?"
 
@@ -349,8 +366,8 @@ class ClaudeSessionBrain(Brain):
 
 # --- the device IO surface (so the loop is testable without a real device) --
 class VoiceIO(ABC):
-    """The four bridge tools the loop needs, as an interface — an MCP-backed
-    impl drives the real device, a fake drives the tests."""
+    """The bridge tools the loop needs, as an interface — an MCP-backed impl
+    drives the real device, a fake drives the tests."""
 
     @abstractmethod
     async def wait_for_utterance(self, timeout_s: Optional[float] = None) -> str: ...
@@ -362,6 +379,8 @@ class VoiceIO(ABC):
     async def show(self, text: str) -> None: ...
     @abstractmethod
     async def end_conversation(self) -> None: ...
+    @abstractmethod
+    async def listen(self) -> None: ...
 
 
 class McpVoiceIO(VoiceIO):
@@ -390,10 +409,64 @@ class McpVoiceIO(VoiceIO):
     async def end_conversation(self) -> None:
         await self._session.call_tool("end_conversation", {})
 
+    async def listen(self) -> None:
+        await self._session.call_tool("listen", {})
+
+
+# --- ambient greeting (SPEC §7a) --------------------------------------------
+class Activity:
+    """When the device was last busy with a conversation, so an ambient greeting
+    never talks over one. The voice driver can't see the bridge's conversation
+    window directly, so it tracks its own turns and treats the follow-up window
+    as still-busy."""
+
+    def __init__(self, window_s: float = 20.0,
+                 now: Callable[[], float] = time.monotonic) -> None:
+        self._window_s = window_s
+        self._now = now
+        self._last = None  # type: Optional[float]
+
+    def touch(self) -> None:
+        self._last = self._now()
+
+    def busy(self) -> bool:
+        return self._last is not None and (self._now() - self._last) < self._window_s
+
+
+async def greet_on_arrival(io: VoiceIO, source, policy, activity: Activity, *,
+                           greetings=None, max_greetings: Optional[int] = None) -> None:
+    """Watch a presence source; greet the user when they arrive.
+
+    The greeting is deliberately *not* a brain turn: a canned line plays straight
+    away and a listening window opens after it, so walking past the study costs
+    nothing and there's no cold-start pause between the door and the hello. If
+    the user answers, the main voice loop picks the utterance up and the brain
+    takes over from there (SPEC §7a).
+
+    `max_greetings` (for tests) returns after that many greetings.
+    """
+    greeted = 0
+    async for occupied in source.readings():
+        if not policy.update(occupied, busy=activity.busy()):
+            continue
+        line = policy.greeting(greetings)
+        log.info("presence: arrival -> greeting %r", line)
+        try:
+            await io.set_state("speaking")
+            await io.speak(line)
+            await io.listen()  # open a window so they can just answer
+            activity.touch()
+        except Exception as exc:  # device unplugged, bridge restarting, ...
+            log.warning("presence greeting failed (%s) — skipping it", exc)
+        greeted += 1
+        if max_greetings is not None and greeted >= max_greetings:
+            return
+
 
 # --- the loop ---------------------------------------------------------------
 async def run_voice_loop(io: VoiceIO, brain: Brain, *, idle_timeout_s: float = 1800.0,
-                         max_turns: Optional[int] = None) -> None:
+                         max_turns: Optional[int] = None,
+                         activity: Optional[Activity] = None) -> None:
     """Drive the device voice loop through `brain`. The brain is pre-warmed at
     startup so turn one isn't a cold start, and its session stays warm across turns
     *and across conversations* — a goodbye ends the device turn, not the session.
@@ -434,6 +507,8 @@ async def run_voice_loop(io: VoiceIO, brain: Brain, *, idle_timeout_s: float = 1
             continue
         turn += 1
         log.info("heard: %r", text)
+        if activity is not None:  # a conversation is live: hold off any greeting
+            activity.touch()
         await io.set_state("thinking")
         try:
             reply = await brain.reply(text)
@@ -455,13 +530,36 @@ async def run_voice_loop(io: VoiceIO, brain: Brain, *, idle_timeout_s: float = 1
         log.info("reply: %r%s", reply, "  [end]" if over else "")
         await io.set_state("speaking")
         await io.speak(reply)
+        if activity is not None:  # the follow-up window is open — still busy
+            activity.touch()
         if over:
             await io.end_conversation()
     if bg:  # let any in-flight idle memory-save finish
         await asyncio.gather(*bg, return_exceptions=True)
 
 
-async def _serve(brain: Brain, host: str, port: int, idle_timeout_s: float) -> None:
+def build_presence(args) -> tuple:
+    """Build (source, policy) from the CLI args, or (None, None) if the ambient
+    greeting isn't configured. Failing to read the token is fatal *here*, at
+    startup, rather than silently never greeting."""
+    if not args.ha_url or not args.ha_entity:
+        return None, None
+    from clawlexa_bridge.ha import HomeAssistantPresence, read_token
+    from clawlexa_bridge.presence import GreetingPolicy
+
+    token = read_token(args.ha_token_file)
+    source = HomeAssistantPresence(args.ha_url, token, args.ha_entity)
+    quiet_start, quiet_end = args.quiet_hours
+    policy = GreetingPolicy(away_s=args.away_minutes * 60,
+                            min_gap_s=args.away_minutes * 60,
+                            quiet_start_h=quiet_start, quiet_end_h=quiet_end)
+    log.info("ambient greeting: %s, away>=%d min, quiet %02d:00-%02d:00",
+             args.ha_entity, args.away_minutes, quiet_start, quiet_end)
+    return source, policy
+
+
+async def _serve(brain: Brain, host: str, port: int, idle_timeout_s: float,
+                 source=None, policy=None) -> None:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -477,9 +575,24 @@ async def _serve(brain: Brain, host: str, port: int, idle_timeout_s: float) -> N
             tools = await session.list_tools()
             log.info("connected; bridge tools: %s", [t.name for t in tools.tools])
             log.info("waiting for the wake word / tap — Ctrl-C to quit")
+            io = McpVoiceIO(session)
+            activity = Activity()
+            tasks = [asyncio.create_task(
+                run_voice_loop(io, brain, idle_timeout_s=idle_timeout_s,
+                               activity=activity))]
+            if source is not None:
+                log.info("watching for arrivals in the room")
+                tasks.append(asyncio.create_task(
+                    greet_on_arrival(io, source, policy, activity)))
             try:
-                await run_voice_loop(McpVoiceIO(session), brain,
-                                     idle_timeout_s=idle_timeout_s)
+                # Either task ending (or failing) ends the session; the greeting
+                # watcher reconnects internally, so it normally runs forever.
+                done, pending = await asyncio.wait(
+                    tasks, return_when=asyncio.FIRST_COMPLETED)
+                for t in pending:
+                    t.cancel()
+                for t in done:
+                    t.result()  # re-raise whatever stopped us
             finally:
                 await brain.end_session()  # save memory + close on shutdown
 
@@ -517,9 +630,27 @@ def main() -> None:
     parser.add_argument("--effort", default=None,
                         help="reasoning effort: low|medium|high|max. Lower = cheaper/faster. "
                              "Only on Opus 4.5+/Sonnet 4.6 — leave unset for Haiku (it errors).")
+    # --- ambient presence greeting (SPEC §7a) ---
+    parser.add_argument("--ha-url", default=None,
+                        help="Home Assistant base URL (e.g. http://homeassistant.local:8123). "
+                             "Set this together with --ha-entity to enable the ambient "
+                             "greeting; omit either and the device stays wake-word only.")
+    parser.add_argument("--ha-entity", default=None,
+                        help="presence entity to watch, e.g. binary_sensor.study_presence")
+    parser.add_argument("--ha-token-file", default=DEFAULT_TOKEN_PATH,
+                        help=f"file holding a Home Assistant long-lived access token "
+                             f"(default: {DEFAULT_TOKEN_PATH})")
+    parser.add_argument("--away-minutes", type=int, default=30,
+                        help="how long the room must have been empty before returning to "
+                             "it earns a greeting (default: 30). Also the minimum gap "
+                             "between two greetings.")
+    parser.add_argument("--quiet-hours", default="22-8", metavar="START-END",
+                        help="local-hour window with no greetings (default: 22-8). "
+                             "Use '0-0' to greet around the clock.")
     parser.add_argument("--host", default="0.0.0.0", help="device-link bind address")
     parser.add_argument("--port", type=int, default=8765, help="device-link port")
     args = parser.parse_args()
+    args.quiet_hours = parse_quiet_hours(args.quiet_hours)
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -528,8 +659,10 @@ def main() -> None:
                                timeout=args.brain_timeout, memory_prompt=args.memory_prompt,
                                warm_prompt=args.warm_prompt or None, cost_log=args.cost_log,
                                model=args.brain_model, effort=args.effort)
+    source, policy = build_presence(args)
     try:
-        asyncio.run(_serve(brain, args.host, args.port, args.idle_timeout))
+        asyncio.run(_serve(brain, args.host, args.port, args.idle_timeout,
+                           source=source, policy=policy))
     except KeyboardInterrupt:
         pass
 

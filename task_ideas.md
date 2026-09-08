@@ -364,3 +364,31 @@ When a task is T5-only at face value, decompose it: list the device-free slices
   detector's trailing window, or stripping a leading wake-token on the bridge.
   Tell: the transcript no longer contains the wake word.
 - **Verification tier:** T5 (live audio); minor — intent usually still matches.
+
+### AMB-1 — Ambient presence greeting (the room starts the conversation)
+- **Anchor:** after this PR (Phase 6c).
+- **Prompt:** "A Home Assistant presence sensor covers the study. Make the device
+  greet the user when they walk in after being away a while, and let them answer
+  without saying the wake word."
+- **Done-correctly:** three pieces, and the split between them is the whole
+  exercise. (1) A pure `GreetingPolicy` — presence readings in, greet/don't out —
+  with both clocks injected: only clear→occupied *edges*, only after an absence
+  threshold, quiet hours, a debounce, never over a live conversation, and never on
+  the first reading (at startup you don't know where the user has been). (2) An
+  HA WebSocket subscription whose decoding is pure functions, so the auth →
+  get_states → subscribe → event handshake is testable with a fake socket. (3) A
+  new `start_turn` control frame letting the *bridge* open a listening window —
+  the piece most models miss entirely, leaving a greeting the user can only answer
+  by saying the wake word, which defeats the point.
+- **Footguns:** (a) `unavailable`/`unknown` read as "empty" — a sensor blipping
+  offline then fakes a long absence and greets on its return; (b) sending
+  `start_turn` right after the greeting clip, which lands inside the firmware's
+  300 ms half-duplex mute tail — a tap is dropped there, so a model that copies
+  the tap path gets a window that never opens (the fix is to *queue* the remote
+  wake, see `wake_trigger_eval`); (c) generating the greeting with the LLM, which
+  pays a cold start plus session-priming cost every time someone walks past.
+- **Device-free slices:** T-host `test_presence.py` (every policy rule),
+  `test_ha.py` (the full HA handshake against a fake socket), `test_voice_agent.py`
+  (arrival → spoken line → `listen()`); T2 `test_wake_gate.c::test_muted_queues_a_
+  remote_start_turn` makes footgun (b) gradeable with no board. Only the physical
+  "walk into the study" is T5.
