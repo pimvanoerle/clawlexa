@@ -84,11 +84,41 @@ word — only Home Assistant is unreachable. Running the very same virtualenv
 Python interactively (over SSH, say) succeeds, because that process has a
 different responsible app.
 
-Fix: **System Settings → Privacy & Security → Local Network**, and enable the
-entry for the agent (it appears once the job has attempted a connection — look
-for the Python binary, `sh`, or the job label). Then
-`launchctl kickstart -k gui/$(id -u)/com.ipinch.clawlexa-voice`. A successful
-start logs `Home Assistant: watching <entity> on <host>`.
+**First confirm it really is this**, because Errno 65 reads like a routing
+problem. The tell is one process doing both: the agent reaches the internet
+happily (`httpx ... huggingface.co "HTTP/1.1 200 OK"` while loading STT models)
+and *only* LAN addresses fail. An IPv4 literal failing exactly like the mDNS
+hostname is the second tell.
+
+Fix, and **the order matters**:
+
+1. **Make sure the Python binary is code-signed.** This is the step that traps
+   people. A `uv`-managed (or pyenv-built) CPython is often *not signed at all*
+   — `codesign -dvvv .venv/bin/python` says `code object is not signed at all`.
+   TCC cannot identify an unsigned binary, so it can neither prompt for it nor
+   remember a grant: the request is denied in silence, no dialog appears, and no
+   entry is ever added to the Local Network list. Granting the *other* "Python"
+   already in that list does nothing, because it's a different binary. Sign it
+   ad-hoc — the dylib as well as the executable:
+
+   ```bash
+   PYROOT=$(dirname $(dirname $(readlink -f .venv/bin/python)))
+   codesign -s - --force --timestamp=none "$PYROOT/lib/"libpython*.dylib
+   codesign -s - --force --timestamp=none "$PYROOT/bin/python3.12"
+   codesign -dvvv "$PYROOT/bin/python3.12"   # now shows an Identifier + CDHash
+   ```
+
+2. **Restart the job**, then **approve the dialog**. Once the binary has a stable
+   identity macOS can finally raise the prompt — it may appear on the machine's
+   own screen rather than where you're working, so go and look at it:
+   `launchctl kickstart -k gui/$(id -u)/com.ipinch.clawlexa-voice`
+
+3. A successful start logs
+   `clawlexa.presence: Home Assistant: watching <entity> on <host>`.
+
+Running the same command in a terminal works throughout, which is a misleading
+comfort: a foreground process inherits its *terminal's* local-network grant, so
+success there says nothing about the launchd job.
 
 Errno 65 here is a permissions symptom, not a routing one — don't go hunting
 for a bad IP or an IPv6 problem. A quick way to tell them apart: if an IPv4
