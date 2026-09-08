@@ -28,8 +28,8 @@ size_t pcm_ring_free(const pcm_ring_t *r) {
 size_t pcm_ring_write(pcm_ring_t *r, const int16_t *src, size_t n) {
     size_t space = pcm_ring_free(r);
     if (n > space) {
-        r->dropped += n - space;
-        n = space;
+        n = space;  /* short write; whether the rest is retried or dropped is
+                     * the caller's call, and only the caller can count it */
     }
     size_t head = r->head;
     size_t first = r->cap - head;      /* room before wrapping */

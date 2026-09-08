@@ -598,3 +598,15 @@ def test_reconciliation_never_breaks_the_running_totals():
     assert meter.turns == 2
     assert abs(meter.cost_usd - 0.0940) < 1e-9
     assert "2 turns" in meter.totals_line()
+
+
+def test_voice_prompt_forbids_promising_to_go_and_look_things_up():
+    """Live bug: the brain replied "let me pull up what we've got on that one",
+    which ended the turn — there is no mechanism for it to come back and speak
+    again, so the follow-up window expired and the device went to sleep while Pim
+    sat waiting for an answer that could never arrive."""
+    from tools.voice_agent import VOICE_SYSTEM_PROMPT
+    p = VOICE_SYSTEM_PROMPT.lower()
+    assert "this reply is the whole turn" in p
+    assert "cannot go away" in p
+    assert "never say" in p

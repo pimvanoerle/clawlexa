@@ -23,7 +23,10 @@ typedef struct {
     size_t cap;             /* storage size in samples (usable = cap - 1) */
     volatile size_t head;   /* producer writes here */
     volatile size_t tail;   /* consumer reads here */
-    size_t dropped;         /* samples discarded because the ring was full */
+    size_t dropped;         /* samples the CALLER chose to discard; the ring
+                             * never fills this in — a short write only means
+                             * "wait", and counting that as loss reads like
+                             * audio was thrown away when none was */
 } pcm_ring_t;
 
 /* `storage` must hold `cap_samples` int16_t and outlive the ring. */
@@ -33,7 +36,8 @@ void pcm_ring_init(pcm_ring_t *r, int16_t *storage, size_t cap_samples);
 void pcm_ring_reset(pcm_ring_t *r);
 
 /* Copy up to `n` samples in; returns how many fit. A short return means the
- * consumer is behind — the caller decides whether to wait or drop. */
+ * consumer is behind — the caller decides whether to wait or drop, and is the
+ * only one that can meaningfully count a drop. */
 size_t pcm_ring_write(pcm_ring_t *r, const int16_t *src, size_t n);
 
 /* Copy up to `n` samples out; returns how many were available. */

@@ -56,14 +56,31 @@ void test_full_ring_keeps_one_slot_empty(void) {
     TEST_ASSERT_EQUAL_UINT(0, pcm_ring_free(&r));
 }
 
-void test_overflow_is_counted_not_silent(void) {
-    /* A short write tells the producer to wait; the counter proves whether we
-     * ever actually threw audio away. */
+void test_a_full_ring_reports_a_short_write_not_a_drop(void) {
+    /* Regression: the ring used to add the unwritten remainder to `dropped`,
+     * but the caller retries it — so a healthy clip that simply ran ahead of
+     * the speaker logged hundreds of thousands of "dropped" samples while
+     * playing every one of them. A short write means "wait", nothing more. */
     const int16_t in[CAP] = {1, 2, 3, 4, 5, 6, 7, 8};
     TEST_ASSERT_EQUAL_UINT(CAP - 1, pcm_ring_write(&r, in, CAP));
-    TEST_ASSERT_EQUAL_UINT(1, r.dropped);
-    TEST_ASSERT_EQUAL_UINT(0, pcm_ring_write(&r, in, 3));
-    TEST_ASSERT_EQUAL_UINT(4, r.dropped);
+    TEST_ASSERT_EQUAL_UINT(0, r.dropped);
+    TEST_ASSERT_EQUAL_UINT(0, pcm_ring_write(&r, in, 3));  /* full: takes none */
+    TEST_ASSERT_EQUAL_UINT(0, r.dropped);
+}
+
+void test_retrying_a_short_write_loses_nothing(void) {
+    /* Exactly what audio_play_pcm does: write what fits, drain, write the rest,
+     * and every sample still comes out in order. */
+    const int16_t in[10] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    size_t done = pcm_ring_write(&r, in, 10);
+    TEST_ASSERT_EQUAL_UINT(CAP - 1, done);
+    int16_t out[10];
+    TEST_ASSERT_EQUAL_UINT(CAP - 1, pcm_ring_read(&r, out, 10));
+    done += pcm_ring_write(&r, in + done, 10 - done);
+    TEST_ASSERT_EQUAL_UINT(10, done);
+    TEST_ASSERT_EQUAL_UINT(3, pcm_ring_read(&r, out + CAP - 1, 10));
+    TEST_ASSERT_EQUAL_INT16_ARRAY(in, out, 10);
+    TEST_ASSERT_EQUAL_UINT(0, r.dropped);
 }
 
 void test_read_from_empty_returns_nothing(void) {
@@ -106,7 +123,8 @@ int main(void) {
     RUN_TEST(test_partial_read_leaves_the_rest_in_order);
     RUN_TEST(test_data_survives_wrapping);
     RUN_TEST(test_full_ring_keeps_one_slot_empty);
-    RUN_TEST(test_overflow_is_counted_not_silent);
+    RUN_TEST(test_a_full_ring_reports_a_short_write_not_a_drop);
+    RUN_TEST(test_retrying_a_short_write_loses_nothing);
     RUN_TEST(test_read_from_empty_returns_nothing);
     RUN_TEST(test_reset_discards_audio_and_the_drop_count);
     RUN_TEST(test_streaming_many_chunks_preserves_the_whole_sequence);
