@@ -11,6 +11,16 @@ from clawlexa_bridge.mcp_server import build_mcp
 from clawlexa_bridge.tts import FakeTTS
 
 
+class FakeWS:
+    """A device connection that records the control frames sent to it."""
+
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, frame):
+        self.sent.append(frame)
+
+
 def _text(result):
     """First text block of a CallToolResult."""
     return result.content[0].text
@@ -60,3 +70,27 @@ def test_wait_for_utterance_times_out_to_empty():
             return _text(await client.call_tool("wait_for_utterance", {"timeout_ms": 50}))
 
     assert asyncio.run(run()) == ""  # nothing said within the window
+
+
+def test_listen_is_served_while_wait_for_utterance_is_blocked():
+    """The ambient greeting (SPEC §7a) calls tools from a second task while the
+    voice loop sits blocked in wait_for_utterance. If the server dispatched
+    requests one at a time that would deadlock — and only ever live, on a real
+    device. Prove it here instead.
+    """
+    async def run():
+        hub = Hub(FakeTTS(), send_wav=None)
+        ws = FakeWS()
+        hub.attach(ws)
+        async with connected(build_mcp(hub)) as client:
+            waiting = asyncio.create_task(
+                client.call_tool("wait_for_utterance", {"timeout_ms": 5000}))
+            await asyncio.sleep(0)  # let it reach the server and block
+            # ... the greeting task opens a listening window meanwhile
+            opened = await asyncio.wait_for(client.call_tool("listen", {}), timeout=5)
+            await hub.submit_utterance("hey pinchy")
+            return _text(opened), _text(await asyncio.wait_for(waiting, timeout=5))
+
+    opened, heard = asyncio.run(run())
+    assert opened == "ok"
+    assert heard == "hey pinchy"
