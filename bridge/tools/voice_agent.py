@@ -172,6 +172,12 @@ class CostMeter:
     TOKENS = ("input_tokens", "output_tokens",
               "cache_read_input_tokens", "cache_creation_input_tokens")
 
+    # Haiku 4.5 list rates, $ per token: input, output, cache read (0.1x input),
+    # 5-minute cache write (1.25x input). Only used to sanity-check the CLI's own
+    # figure — see `_reconcile`. Update if --brain-model changes tier.
+    RATES = {"input_tokens": 1.0e-6, "output_tokens": 5.0e-6,
+             "cache_read_input_tokens": 0.1e-6, "cache_creation_input_tokens": 1.25e-6}
+
     def __init__(self) -> None:
         self.turns = 0
         self.cost_usd = 0.0
@@ -186,7 +192,30 @@ class CostMeter:
         self.cost_usd += cost
         for k in self.TOKENS:
             self.tokens[k] += this[k]
-        return self._fmt(this, cost)
+        return self._fmt(this, cost) + self._reconcile(u, this, cost)
+
+    @classmethod
+    def _reconcile(cls, usage: dict, tokens: dict, cost: float) -> str:
+        """Explain the turn's cost when the headline `usage` doesn't account for it.
+
+        `total_cost_usd` covers every API iteration the agent made this turn,
+        while `usage` is the shape the CLI reports alongside it — so a turn that
+        looped (reading files, re-priming) costs far more than these token counts
+        imply, with nothing in the log to say so. We saw ~26x. `usage.iterations`
+        is where the truth is, so surface its length and the implied-vs-charged
+        gap; both are free to read.
+        """
+        iters = usage.get("iterations")
+        n = len(iters) if isinstance(iters, list) else None
+        implied = sum(tokens[k] * cls.RATES[k] for k in cls.TOKENS)
+        bits = []
+        if n is not None and n != 1:
+            bits.append("iters=%d" % n)
+        # A ratio near 1.0 means the logged tokens explain the bill.
+        if implied > 0 and cost > 0 and cost / implied >= 1.5:
+            bits.append("UNACCOUNTED %.1fx (logged tokens imply $%.4f)"
+                        % (cost / implied, implied))
+        return ("  [%s]" % " ".join(bits)) if bits else ""
 
     def totals_line(self) -> str:
         return "session total: %d turns, %s" % (

@@ -240,7 +240,9 @@ def test_cost_meter_accumulates():
     m = CostMeter()
     line = m.record({"input_tokens": 10, "output_tokens": 5,
                      "cache_read_input_tokens": 0, "cache_creation_input_tokens": 2}, 0.01)
-    assert "in=10 out=5 cache_r=0 cache_w=2 $0.0100" == line
+    # startswith, not equality: the line may carry a trailing reconciliation
+    # note (see the cost-reconciliation tests below).
+    assert line.startswith("in=10 out=5 cache_r=0 cache_w=2 $0.0100")
     m.record({"input_tokens": 20, "output_tokens": 5}, 0.02)  # missing cache keys -> 0
     assert m.turns == 2
     assert m.tokens["input_tokens"] == 30 and m.tokens["output_tokens"] == 10
@@ -551,3 +553,48 @@ def test_failed_greeting_survives_a_device_that_cannot_even_be_reset():
     io.speak = boom
     io.set_state = boom
     asyncio.run(greet_on_arrival(io, sensor, policy, activity))  # must not raise
+
+
+# --- cost reconciliation (why a turn cost what it cost) ----------------------
+
+def test_cost_line_stays_quiet_when_tokens_explain_the_bill():
+    """The single-iteration case: don't clutter every line."""
+    meter = CostMeter()
+    # 10 in + 39 out + 17673 cache_r + 6800 cache_w at Haiku rates == $0.010472,
+    # the exact figure the CLI returned for a real one-shot call.
+    line = meter.record({"input_tokens": 10, "output_tokens": 39,
+                         "cache_read_input_tokens": 17673,
+                         "cache_creation_input_tokens": 6800,
+                         "iterations": [{}]}, 0.0104723)
+    assert "UNACCOUNTED" not in line and "iters=" not in line
+
+
+def test_cost_line_flags_a_turn_its_tokens_cannot_explain():
+    """The real turn-4 numbers from the live conversation: charged $0.0940 while
+    the logged tokens imply $0.0036."""
+    meter = CostMeter()
+    line = meter.record({"input_tokens": 10, "output_tokens": 99,
+                         "cache_read_input_tokens": 30060,
+                         "cache_creation_input_tokens": 58}, 0.0940)
+    assert "UNACCOUNTED" in line
+    assert "26.2x" in line or "26.1x" in line, line
+
+
+def test_cost_line_reports_iteration_count_when_a_turn_looped():
+    meter = CostMeter()
+    line = meter.record({"input_tokens": 10, "output_tokens": 39,
+                         "cache_read_input_tokens": 17673,
+                         "cache_creation_input_tokens": 6800,
+                         "iterations": [{}, {}, {}]}, 0.0104723)
+    assert "iters=3" in line
+
+
+def test_reconciliation_never_breaks_the_running_totals():
+    meter = CostMeter()
+    meter.record({"input_tokens": 10, "output_tokens": 99,
+                  "cache_read_input_tokens": 30060,
+                  "cache_creation_input_tokens": 58}, 0.0940)
+    meter.record(None, None)  # a turn the SDK reported nothing for
+    assert meter.turns == 2
+    assert abs(meter.cost_usd - 0.0940) < 1e-9
+    assert "2 turns" in meter.totals_line()
