@@ -74,6 +74,27 @@ Tuning:
 
 ## Troubleshooting
 
+**The presence greeting never fires; the log repeats `Home Assistant link to
+... failed ([Errno 65] No route to host)` — but the same command works fine
+from a terminal.** macOS 15 (Sequoia) added a **Local Network** privacy control,
+and a `launchd` background agent can't show the permission prompt, so it is
+silently denied. The symptom is confusing because it is *outbound* only: the
+device's inbound WebSocket keeps working, so the crab still answers the wake
+word — only Home Assistant is unreachable. Running the very same virtualenv
+Python interactively (over SSH, say) succeeds, because that process has a
+different responsible app.
+
+Fix: **System Settings → Privacy & Security → Local Network**, and enable the
+entry for the agent (it appears once the job has attempted a connection — look
+for the Python binary, `sh`, or the job label). Then
+`launchctl kickstart -k gui/$(id -u)/com.ipinch.clawlexa-voice`. A successful
+start logs `Home Assistant: watching <entity> on <host>`.
+
+Errno 65 here is a permissions symptom, not a routing one — don't go hunting
+for a bad IP or an IPv6 problem. A quick way to tell them apart: if an IPv4
+literal *and* the mDNS hostname both fail under `launchd` but both succeed in a
+terminal, it's this.
+
 **Device connects but the link fails (bridge logs `400 Bad Request`; device logs
 `Error read response for Upgrade header`).** If loopback tests pass but the real
 device can't complete the handshake, suspect the **macOS Application Firewall**
