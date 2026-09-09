@@ -42,6 +42,7 @@ static const char *TAG = "wake";
 
 /* Embedded streaming models (EMBED_FILES in main/CMakeLists.txt). */
 extern const uint8_t okay_nabu_start[] asm("_binary_okay_nabu_tflite_start");
+extern const uint8_t hey_pinchy_start[] asm("_binary_hey_pinchy_tflite_start");
 extern const uint8_t vad_start[] asm("_binary_vad_tflite_start");
 
 /* ====================== Wake word selection ==============================
@@ -51,9 +52,14 @@ extern const uint8_t vad_start[] asm("_binary_vad_tflite_start");
  *   3. Point the three macros below at it (symbol, label, and the manifest's
  *      probability_cutoff). The default is the zero-setup bring-up word.
  * The symbol is "_binary_<file>_tflite_start" for "<file>.tflite". */
-#define WAKE_MODEL_START   okay_nabu_start
-#define WAKE_WORD_LABEL    "okay nabu"
-#define WAKE_CUTOFF        0.97f   /* from the model's .json manifest */
+#define WAKE_MODEL_START   hey_pinchy_start
+#define WAKE_WORD_LABEL    "hey pinchy"
+/* From hey_pinchy.json: probability_cutoff 0.5, sliding_window_size 5. The
+ * cutoff is far lower than okay_nabu's 0.97 because it is the value the model
+ * was tuned and benchmarked at (77.2% recall, 0.76 false accepts/hour). Raise
+ * it if it triggers on the room; lower it if it misses. `okay nabu` stays
+ * embedded so reverting is a one-line change, not a retrain. */
+#define WAKE_CUTOFF        0.50f
 #define WAKE_SLIDING_WINDOW 5
 /* ========================================================================= */
 

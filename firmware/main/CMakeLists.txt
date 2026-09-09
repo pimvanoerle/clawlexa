@@ -46,6 +46,7 @@ idf_component_register(
     EMBED_FILES
         "assets/boot.wav"
         "wake_models/okay_nabu.tflite"
+        "wake_models/hey_pinchy.tflite"
         "wake_models/vad.tflite"
 )
 

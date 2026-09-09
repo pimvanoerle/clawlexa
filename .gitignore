@@ -29,6 +29,11 @@ firmware/tests/pytest/.venv/
 # ML / wake-word artifacts
 *.h5
 *.tflite
+# ...except the models the firmware embeds. EMBED_FILES references these by
+# name, so without them a fresh clone does not build — and SPEC §7 promises a
+# cloner gets a working wake word with no setup. They are small (33-60 KB) and
+# Apache-2.0 from microWakeWord.
+!firmware/main/wake_models/*.tflite
 *.pb
 *.onnx
 wakeword/data/
