@@ -465,16 +465,24 @@ class ClaudeSessionBrain(Brain):
         if the model reports an error (auth/billing/etc.). The trailing
         ResultMessage carries this turn's token usage + cost, which we log and
         tally (`label` distinguishes reply / warm / memory turns)."""
-        parts = []
+        # One turn can now span several assistant messages: a tool-using turn
+        # narrates ("Let me check the study sensor"), calls a tool, then answers.
+        # Only the LAST message is the answer — speaking the narration too made
+        # replies long-winded, and joining every block with "" ran them together
+        # into "...sensor.I don't see...". Keep each message separate and speak
+        # the final one.
+        messages = []
         async for msg in self._client.receive_response():
             tn = type(msg).__name__
             if tn == "AssistantMessage":
                 err = getattr(msg, "error", None)
                 if err:
                     raise BrainError(f"brain error: {err}")
-                for block in getattr(msg, "content", None) or []:
-                    if type(block).__name__ == "TextBlock":
-                        parts.append(getattr(block, "text", ""))
+                text = " ".join(
+                    getattr(b, "text", "") for b in (getattr(msg, "content", None) or [])
+                    if type(b).__name__ == "TextBlock").strip()
+                if text:
+                    messages.append(text)
             elif tn == "ResultMessage":
                 usage = getattr(msg, "usage", None)
                 cost = getattr(msg, "total_cost_usd", None)
@@ -483,7 +491,10 @@ class ClaudeSessionBrain(Brain):
                 log.info("result[%s]: %s", label, describe_result(msg))
                 if self._cost_log:
                     append_cost_row(self._cost_log, label, usage, cost)
-        return "".join(parts).strip()
+        if len(messages) > 1:
+            log.info("tool turn: spoke the last of %d assistant messages",
+                     len(messages))
+        return messages[-1] if messages else ""
 
     async def warm(self) -> None:
         """Pre-open the session so the first turn skips cold-start, and prime it

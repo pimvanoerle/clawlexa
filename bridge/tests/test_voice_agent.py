@@ -831,3 +831,43 @@ def test_bridge_reply_cap_sits_above_the_drivers_own_timeout():
     assert DEFAULT_REPLY_TIMEOUT_S > driver_default_brain_timeout
     # and with headroom for a tool turn, not by a whisker
     assert DEFAULT_REPLY_TIMEOUT_S >= 2 * driver_default_brain_timeout
+
+
+# --- what gets spoken after a tool-using turn -------------------------------
+
+def _brain_returning(messages):
+    fc = FakeClient([[AssistantMessage([TextBlock(t)]) for t in messages]])
+    return ClaudeSessionBrain(client_factory=lambda: fc), fc
+
+
+def test_a_tool_turn_speaks_the_answer_not_the_narration():
+    """Live: the crab said "Let me check the Home Assistant setup for the study
+    temperature sensor.I don't see a temperature sensor..." — narration and
+    answer welded together with no space. Only the final message is the answer."""
+    brain, _ = _brain_returning([
+        "Let me check the study temperature sensor.",
+        "I'll search Home Assistant for it.",
+        "It's 28.2 degrees in the study.",
+    ])
+    assert asyncio.run(brain.reply("how warm is the study?")) == \
+        "It's 28.2 degrees in the study."
+
+
+def test_a_plain_turn_is_unaffected():
+    brain, _ = _brain_returning(["Hey, doing great."])
+    assert asyncio.run(brain.reply("how are you?")) == "Hey, doing great."
+
+
+def test_blocks_within_one_message_are_joined_with_a_space():
+    fc = FakeClient([[AssistantMessage([TextBlock("It's 28.2 degrees"),
+                                        TextBlock("in the study.")])]])
+    brain = ClaudeSessionBrain(client_factory=lambda: fc)
+    assert asyncio.run(brain.reply("q")) == "It's 28.2 degrees in the study."
+
+
+def test_a_turn_with_no_text_at_all_returns_empty():
+    """Ends on a tool call with nothing to say — the loop substitutes its own
+    line rather than speaking silence."""
+    fc = FakeClient([[AssistantMessage([])]])
+    brain = ClaudeSessionBrain(client_factory=lambda: fc)
+    assert asyncio.run(brain.reply("q")) == ""
