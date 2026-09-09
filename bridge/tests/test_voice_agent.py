@@ -607,12 +607,22 @@ def test_voice_prompt_forbids_promising_to_go_and_look_things_up():
     """Live bug: the brain replied "let me pull up what we've got on that one",
     which ended the turn — there is no mechanism for it to come back and speak
     again, so the follow-up window expired and the device went to sleep while Pim
-    sat waiting for an answer that could never arrive."""
+    sat waiting for an answer that could never arrive. Still true now that it has
+    tools: the lookup has to happen *inside* the turn."""
     from tools.voice_agent import VOICE_SYSTEM_PROMPT
     p = VOICE_SYSTEM_PROMPT.lower()
-    assert "this reply is the whole turn" in p
-    assert "cannot go away" in p
+    assert "this reply is still the whole turn" in p
     assert "never say" in p
+
+
+def test_voice_prompt_tells_the_brain_it_may_look_things_up():
+    """The prompt used to forbid tool use outright for speed. With MCP servers
+    wired in, leaving that in place would give the crab tools it believes it
+    isn't allowed to touch."""
+    from tools.voice_agent import VOICE_SYSTEM_PROMPT
+    p = VOICE_SYSTEM_PROMPT.lower()
+    assert "read-only tools" in p
+    assert "lookup or two" in p          # bounded: the user is waiting
 
 
 def test_unreconciled_turn_dumps_the_raw_usage(caplog):
