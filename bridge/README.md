@@ -112,11 +112,12 @@ different processes: if the bridge's safety net fires first it re-arms the wake
 word before the agent can speak its error, and you get a crab that fell asleep
 mid-lookup. Raise them together.
 
-**The model must know your names for things.** Ours calls a room "the study"
-while Home Assistant calls it `huis_office`; without being told, the brain
-searched notes, found nothing, and confidently reported there was no temperature
-sensor. A line in the warm prompt mapping spoken names to entity names fixed it.
-Deployment-specific, so it belongs in your launcher, not here.
+**The model must know your names for things.** Spoken room names rarely match
+entity ids — ours differ, and without being told the brain searched its notes,
+found nothing, and confidently reported the sensor didn't exist. Note that it
+failed *confidently* rather than erroring, which is the hard part to spot. A line
+in the warm prompt mapping spoken names to entity ids fixes it; that mapping is
+deployment-specific, so keep it in your launcher rather than here.
 
 ## Troubleshooting
 

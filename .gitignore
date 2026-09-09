@@ -39,5 +39,16 @@ config.local.*
 secrets.*
 recordings/
 
+# Claude Code's per-machine settings. This holds a permission allowlist that
+# accumulates real infrastructure detail — SSH hosts and key paths, LAN and
+# Tailscale addresses, deployment commands. It was ignored only by a *global*
+# git config on one machine, which does not travel: pinned here so a clone
+# anywhere can't commit it to a public repo.
+.claude/settings.local.json
+
+# Git bundles are a full copy of the repo's history — never commit one into the
+# repo it came from.
+*.bundle
+
 # Downloaded TTS voice models (fetched on first run; ~60 MB each)
 bridge/voices/
