@@ -436,7 +436,7 @@ Nothing in here yet — created as each phase starts.
       live conversation), and a canned time-of-day line plays before a
       bridge-opened listening window (`start_turn`, the `listen()` tool) lets the
       user answer with no wake word. The brain only wakes if they do.
-- [ ] **Phase 6d** — Tool-using voice turns: let the agent actually answer "where
+- [~] **Phase 6d** — Tool-using voice turns: let the agent actually answer "where
       are we with X" from its vault. Today the voice prompt forbids tool use to
       keep replies fast, so the brain either guesses or (before the prompt fix)
       promised to "go and look it up" and then ended the turn, leaving the device
@@ -449,6 +449,17 @@ Nothing in here yet — created as each phase starts.
       to end in the crab *saying something* and returning to a sane state, never
       in silence. Cost matters too: tool turns are the expensive kind, and voice
       turns already bill well above their logged tokens (see §10 open item).
+      **Done:** MCP servers reach the brain (`--mcp-config`), tools are named
+      individually (`--allow-tool`, read-only to start — a misheard sentence must
+      not act on the world), a holding line covers the silence (`--holding-after`),
+      the two timeouts are ordered and pinned by a test, and `--max-budget-usd`
+      caps a runaway turn. Verified live: "where are we with the robot body
+      project" now answers from the vault, and "what's the temperature in the
+      study" from Home Assistant, both in 8-10 s.
+      **Remaining:** the other failure modes — API timeout, network drop
+      mid-lookup, a turn that never returns — still need to end in speech rather
+      than silence; a distinct `working` crab if the audible cue proves not
+      enough; and write-capable tools once read-only has earned trust.
 - [ ] **Phase 7** — Second-agent integration (ourclaw or Claude Desktop) to
       prove the MCP boundary is real.
 - [ ] **Phase 8+** — Stretch: barge-in, on-screen content from agent, IMU

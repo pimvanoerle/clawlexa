@@ -72,6 +72,52 @@ Tuning:
 | `--quiet-hours` | `22-8` | Local-hour window with no greetings. `0-0` disables quiet hours. |
 | `--greeting` | built-in lines | `WHEN:TEXT` (WHEN = `morning`/`afternoon`/`evening`). Repeat for several lines; they rotate. A time of day you don't mention keeps its built-in line. Use it to give the device a persona without putting one in the repo. |
 
+## Giving the brain tools (Phase 6d)
+
+By default the voice brain has only Claude Code's built-in tools, so it can read
+the project it runs in but nothing else. `--mcp-config` points it at a
+Claude-style MCP config — ideally **the same file your other entry points use**,
+so they can't drift apart:
+
+```bash
+.venv/bin/python tools/voice_agent.py \
+    --brain-cwd ~/claude --claude-cli ./node_modules/.bin/claude \
+    --mcp-config ~/ipinch-bot/mcp-servers.json \
+    --allow-tool mcp__home-assistant__ha_get_state \
+    --allow-tool mcp__gdocs__gdrive_search \
+    --holding-after 4 --brain-timeout 240 --max-budget-usd 0.50
+```
+
+**Naming any tool switches the CLI into allowlist mode**, which silently disables
+every tool you didn't name. The driver re-adds `BUILTIN_TOOLS` for you, so `Read`,
+`WebFetch` and friends survive — but it means `--allow-tool` is the *whole*
+picture of what MCP can do, and anything you leave out is off.
+
+Prefer naming individual read-only tools over `mcp__<server>` wildcards. Speech
+gets misheard, and a garbled sentence should not be able to turn the heating off
+or email someone. A wildcard is only safe when the whole server is read-only.
+
+| Flag | Default | What it does |
+|------|---------|--------------|
+| `--mcp-config` | none | Claude-style `{"mcpServers": {...}}` file. A bad path fails at startup rather than quietly producing a brain with no tools. |
+| `--allow-tool` | none | One tool (`mcp__server__tool`) or a whole server (`mcp__server`). Repeatable. |
+| `--holding-after` | `4` | Speak a holding line once a turn takes this long, so a slow lookup isn't dead air. `0` disables. |
+| `--max-budget-usd` | none | Stop a turn once it has cost this much — a seatbelt for a turn that loops. |
+
+### Two things that bite
+
+**Timeout ordering.** `--brain-timeout` must stay *below* the bridge's
+`DEFAULT_REPLY_TIMEOUT_S` (`clawlexa_bridge/conversation.py`, 300s). They live in
+different processes: if the bridge's safety net fires first it re-arms the wake
+word before the agent can speak its error, and you get a crab that fell asleep
+mid-lookup. Raise them together.
+
+**The model must know your names for things.** Ours calls a room "the study"
+while Home Assistant calls it `huis_office`; without being told, the brain
+searched notes, found nothing, and confidently reported there was no temperature
+sensor. A line in the warm prompt mapping spoken names to entity names fixed it.
+Deployment-specific, so it belongs in your launcher, not here.
+
 ## Troubleshooting
 
 **The presence greeting never fires; the log repeats `Home Assistant link to
