@@ -31,6 +31,14 @@ static const char *TAG = "ws";
 #define MIC_FRAME_SAMPLES 256   /* 16 ms per binary frame @ 16 kHz */
 #define MIC_PLAYBACK_TAIL_US 300000  /* keep mic muted 300 ms past playback */
 #define LINK_ERROR_GRACE_US 4000000  /* link down this long -> error crab (debounce) */
+/* How long to sit in the error state before restarting the WebSocket client
+ * ourselves. The client normally reconnects on its own, but it can wedge: if our
+ * event handler blocks past its network timeout it tears the connection down
+ * internally *without* dispatching a DISCONNECTED event, so `s_connected` stays
+ * true, `s_send_fails` never clears, and nothing ever calls us back. That left
+ * the device showing the error crab for over three hours until a human tapped
+ * it. Recovery should not need someone to walk to the study. */
+#define LINK_RESTART_AFTER_US 20000000  /* 20 s in error -> restart the ws client */
 #define MIC_SEND_FAIL_LIMIT 60   /* ~1s of failing sends -> treat a "connected" socket as dead */
 
 static esp_websocket_client_handle_t s_client;
@@ -145,6 +153,15 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data
             }
         } else if ((e->op_code == WS_BIN_OPCODE || e->op_code == WS_CONT_OPCODE) &&
                    e->data_len >= 2) {
+            /* PCM is 16-bit: an odd-length payload is half a sample. Dropping
+             * the stray byte byte-shifts every sample after it, which is a
+             * plausible source of the occasional crackle — so say so rather
+             * than swallowing it. (A 1-byte fragment is already skipped by the
+             * >= 2 guard above, with the same effect.) */
+            if ((e->data_len & 1) != 0) {
+                ESP_LOGW(TAG, "odd PCM payload (%d bytes) — sample alignment may shift",
+                         e->data_len);
+            }
             audio_play_pcm((const int16_t *)e->data_ptr, e->data_len / 2);
         }
         break;
@@ -287,6 +304,23 @@ static void mic_stream_task(void *arg) {
                 ESP_LOGW(TAG, "tap in error -> restarting");
                 vTaskDelay(pdMS_TO_TICKS(50));  /* let the log line flush first */
                 esp_restart();
+            }
+            /* Self-heal: kick the WebSocket client rather than waiting for a
+             * tap. stop+start also clears a wedged internal state that no
+             * DISCONNECTED event ever reported. Retried on an interval, since a
+             * bridge that is simply down will need several attempts. */
+            if (now - link_down_since > LINK_RESTART_AFTER_US) {
+                /* No %ll: newlib nano formatting has no 64-bit specifiers and
+                 * misparses the varargs (this crashed the device once already). */
+                ESP_LOGW(TAG, "still down after %lus -> restarting ws client",
+                         (unsigned long)(LINK_RESTART_AFTER_US / 1000000));
+                esp_websocket_client_stop(s_client);
+                s_connected = false;
+                s_send_fails = 0;   /* a fresh socket deserves a fresh tally */
+                if (esp_websocket_client_start(s_client) != ESP_OK) {
+                    ESP_LOGE(TAG, "ws client restart failed");
+                }
+                link_down_since = now;  /* wait another interval before retrying */
             }
             continue;  /* don't wake-detect or stream while the link is down */
         }

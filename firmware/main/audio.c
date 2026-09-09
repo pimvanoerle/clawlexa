@@ -19,10 +19,20 @@ static const char *TAG = "audio";
 #define TONE_AMPLITUDE     8000
 #define TONE_CHUNK         320  /* 20 ms @ 16 kHz mono */
 
-/* Jitter buffer for streamed playback. 2 s at 16 kHz = 64 KB, allocated from
- * PSRAM (CONFIG_SPIRAM) so it costs no internal RAM. The I2S DMA underneath is
- * only 90 ms deep, so this is what actually absorbs a WiFi stall. */
-#define PLAY_RING_SAMPLES  (AUDIO_SAMPLE_RATE * 2)
+/* Jitter buffer for streamed playback, sized to hold a WHOLE reply: 30 s at
+ * 16 kHz = 960 KB, from PSRAM (CONFIG_SPIRAM) so it costs no internal RAM.
+ *
+ * The size is a correctness matter, not comfort. `audio_play_pcm` runs on the
+ * WebSocket event task, and back-pressure there blocks that task — which is how
+ * a 19.6 s reply wedged the link: the handler was blocked ~18 s, well past the
+ * client's 10 s network timeout, so it tore the connection down internally and
+ * never dispatched a DISCONNECTED event. The device sat in the error state for
+ * hours with no reconnect. Hold a whole clip and the handler drains the socket
+ * immediately and returns; back-pressure stays only as a last resort.
+ *
+ * Long replies are why this became reachable: tool-using turns produce answers
+ * far longer than anything the device saw before (SPEC §12 Phase 6d). */
+#define PLAY_RING_SAMPLES  (AUDIO_SAMPLE_RATE * 30)
 /* Audio to have in hand before the first sample goes out. Cheap in practice:
  * the bridge pushes a whole clip far faster than real time, so this is ~30 ms
  * of wall clock, and it comfortably fits inside the device's post-playback mic
@@ -117,6 +127,16 @@ esp_err_t audio_play_tone(uint32_t freq_hz, uint32_t duration_ms) {
 }
 
 void audio_play_begin(void) {
+    /* A new clip while the previous one is still draining means we are about to
+     * discard audio the speaker had not reached yet — an audible chop. The
+     * bridge paces on the clip's duration, but the device runs a pre-roll behind
+     * that, so back-to-back replies (a holding line then the answer) can land
+     * here. Report it: this is a prime suspect for the occasional pop. */
+    size_t pending = pcm_ring_level(&s_ring);
+    if (pending > 0) {
+        ESP_LOGW(TAG, "new clip with %lums still unplayed — truncating",
+                 (unsigned long)(pending * 1000 / AUDIO_SAMPLE_RATE));
+    }
     pcm_ring_reset(&s_ring);
     s_stats = (audio_play_stats_t){0};
     s_clip_started_us = esp_timer_get_time();
@@ -134,6 +154,9 @@ audio_play_stats_t audio_play_get_stats(void) {
 
 esp_err_t audio_play_pcm(const int16_t *samples, size_t n_samples) {
     ESP_RETURN_ON_FALSE(s_tx, ESP_ERR_INVALID_STATE, TAG, "audio not initialized");
+    if (n_samples == 0) {
+        return ESP_OK;
+    }
     if (!s_draining) {
         /* PCM without a play_begin (an older bridge, or a stray frame after
          * end): treat it as its own clip rather than dropping it. */
