@@ -87,6 +87,39 @@ VOICE_SYSTEM_PROMPT = (
 # Where a Home Assistant long-lived token lives by default (never logged).
 DEFAULT_TOKEN_PATH = "~/.config/ha-token"
 
+# Claude Code's own tools. Naming ANY allowed tool switches the CLI to an
+# allowlist, which silently disables everything unnamed — so these have to be
+# repeated alongside the MCP entries or the brain quietly loses Read, WebFetch
+# and the rest. (The same trap is called out in iPinch's Slack handler.)
+BUILTIN_TOOLS = (
+    "WebFetch", "WebSearch",
+    "Read", "Write", "Edit", "MultiEdit",
+    "Bash", "Glob", "Grep",
+    "Task", "TodoRead", "TodoWrite",
+    "NotebookRead", "NotebookEdit",
+)
+
+
+def load_mcp_servers(path: "Optional[str]") -> "Optional[dict]":
+    """Read a Claude-style MCP config (`{"mcpServers": {...}}`) from `path`.
+
+    Returns None when no path is given. Raises with a clear message otherwise —
+    a typo'd path should stop the driver at startup, not silently produce a crab
+    with no tools that nobody notices until it can't answer a question.
+    """
+    if not path:
+        return None
+    import json
+    import os
+
+    full = os.path.expanduser(path)
+    with open(full, "r") as f:
+        config = json.load(f)
+    servers = config.get("mcpServers") if isinstance(config, dict) else None
+    if not isinstance(servers, dict) or not servers:
+        raise ValueError(f"no 'mcpServers' object in {full}")
+    return servers
+
 
 def parse_quiet_hours(spec: str) -> tuple[int, int]:
     """Parse a '22-8' quiet-hours window into (start, end) local hours. Equal
@@ -127,6 +160,15 @@ def parse_greetings(specs) -> "Optional[dict]":
     table.update({k: tuple(v) for k, v in custom.items()})
     return table
 
+
+# Spoken when a turn is taking long enough that silence would read as a hang.
+# Rotates so a run of slow turns doesn't sound like a stuck record.
+HOLDING_LINES = (
+    "Let me have a look.",
+    "One moment, checking that.",
+    "Hang on, looking that up.",
+)
+DEFAULT_HOLDING_AFTER_S = 4.0
 
 BRAIN_ERROR_REPLY = "Sorry, I hit a problem thinking about that."
 EMPTY_BRAIN_REPLY = "I didn't catch that — could you say it again?"
@@ -348,6 +390,9 @@ class ClaudeSessionBrain(Brain):
                  effort: Optional[str] = None,
                  permission_mode: str = "acceptEdits",
                  setting_sources: Sequence[str] = ("project", "user"),
+                 mcp_servers: Optional[dict] = None,
+                 allowed_tools: Optional[Sequence[str]] = None,
+                 max_budget_usd: Optional[float] = None,
                  client_factory: Optional[Callable[[], object]] = None) -> None:
         self._cwd = cwd
         self._cli_path = cli_path
@@ -361,6 +406,9 @@ class ClaudeSessionBrain(Brain):
         self._cost = CostMeter()  # process-lifetime token/cost tally
         self._permission_mode = permission_mode
         self._setting_sources = tuple(setting_sources)
+        self._mcp_servers = mcp_servers or None
+        self._allowed_tools = tuple(allowed_tools) if allowed_tools else None
+        self._max_budget_usd = max_budget_usd
         self._client_factory = client_factory or self._default_factory
         self._client = None
         self._turns = 0  # turns this session, reset when the session closes
@@ -382,6 +430,14 @@ class ClaudeSessionBrain(Brain):
             kwargs["model"] = self._model     # e.g. claude-haiku-4-5 for a cheap voice brain
         if self._effort:
             kwargs["effort"] = self._effort   # only on models that support it (not Haiku)
+        if self._mcp_servers:
+            kwargs["mcp_servers"] = self._mcp_servers
+        if self._allowed_tools:
+            kwargs["allowed_tools"] = list(self._allowed_tools)
+        if self._max_budget_usd:
+            # A seatbelt, not a plan: a tool turn that loops should cost a
+            # bounded amount rather than whatever it takes to notice.
+            kwargs["max_budget_usd"] = self._max_budget_usd
         return kwargs
 
     def _default_factory(self):
@@ -605,9 +661,37 @@ async def greet_on_arrival(io: VoiceIO, source, policy, activity: Activity, *,
 
 
 # --- the loop ---------------------------------------------------------------
+async def reply_with_holding_line(io: VoiceIO, brain: Brain, text: str, *,
+                                  holding_after_s: float = DEFAULT_HOLDING_AFTER_S,
+                                  holding_index: int = 0) -> str:
+    """Ask the brain for a reply; if it takes long enough that the silence would
+    read as a hang, say so and keep waiting.
+
+    Tool-using turns are slow — reading a doc or querying the house takes seconds,
+    not milliseconds — and dead air is indistinguishable from a crash. Worse, the
+    device's follow-up window can expire mid-look-up and put it to sleep on a
+    waiting user, which is exactly how last night's "let me pull that up" bug felt.
+
+    The line comes from the driver, not the brain: the brain is busy, and asking
+    it to announce itself first would need a second round trip. Same reasoning
+    that made the ambient greeting canned.
+    """
+    task = asyncio.ensure_future(brain.reply(text))
+    done, _ = await asyncio.wait({task}, timeout=holding_after_s)
+    if not done:
+        line = HOLDING_LINES[holding_index % len(HOLDING_LINES)]
+        log.info("slow turn -> holding line %r", line)
+        try:
+            await io.speak(line)
+        except Exception as exc:  # never let the filler kill the real reply
+            log.warning("holding line failed (%s)", exc)
+    return await task
+
+
 async def run_voice_loop(io: VoiceIO, brain: Brain, *, idle_timeout_s: float = 1800.0,
                          max_turns: Optional[int] = None,
-                         activity: Optional[Activity] = None) -> None:
+                         activity: Optional[Activity] = None,
+                         holding_after_s: float = DEFAULT_HOLDING_AFTER_S) -> None:
     """Drive the device voice loop through `brain`. The brain is pre-warmed at
     startup so turn one isn't a cold start, and its session stays warm across turns
     *and across conversations* — a goodbye ends the device turn, not the session.
@@ -652,7 +736,9 @@ async def run_voice_loop(io: VoiceIO, brain: Brain, *, idle_timeout_s: float = 1
             activity.touch()
         await io.set_state("thinking")
         try:
-            reply = await brain.reply(text)
+            reply = await reply_with_holding_line(
+                io, brain, text, holding_after_s=holding_after_s,
+                holding_index=turn - 1)
         except BrainError as e:
             log.warning("brain error: %s", e)
             await io.set_state("error")
@@ -700,7 +786,8 @@ def build_presence(args) -> tuple:
 
 
 async def _serve(brain: Brain, host: str, port: int, idle_timeout_s: float,
-                 source=None, policy=None, greetings=None) -> None:
+                 source=None, policy=None, greetings=None,
+                 holding_after_s: float = DEFAULT_HOLDING_AFTER_S) -> None:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -720,7 +807,8 @@ async def _serve(brain: Brain, host: str, port: int, idle_timeout_s: float,
             activity = Activity()
             tasks = [asyncio.create_task(
                 run_voice_loop(io, brain, idle_timeout_s=idle_timeout_s,
-                               activity=activity))]
+                               activity=activity,
+                               holding_after_s=holding_after_s))]
             if source is not None:
                 log.info("watching for arrivals in the room")
                 tasks.append(asyncio.create_task(
@@ -772,6 +860,28 @@ def main() -> None:
     parser.add_argument("--effort", default=None,
                         help="reasoning effort: low|medium|high|max. Lower = cheaper/faster. "
                              "Only on Opus 4.5+/Sonnet 4.6 — leave unset for Haiku (it errors).")
+    # --- tools (SPEC §12 Phase 6d) ---
+    parser.add_argument("--mcp-config", default=None, metavar="PATH",
+                        help="Claude-style MCP config ({\"mcpServers\": {...}}) to give "
+                             "the brain. Point it at the same file your other entry "
+                             "points use so they can't drift apart. Without it the "
+                             "brain has only Claude Code's built-in tools.")
+    parser.add_argument("--allow-tool", action="append", default=None, metavar="NAME",
+                        help="permit one tool, e.g. mcp__home-assistant__ha_get_state, "
+                             "or mcp__<server> for a whole server. Repeatable. Naming "
+                             "any tool switches the CLI to an allowlist; the built-ins "
+                             "are re-added automatically so they aren't lost. Prefer "
+                             "naming read-only tools: a misheard sentence should not be "
+                             "able to act on the world.")
+    parser.add_argument("--holding-after", type=float, default=DEFAULT_HOLDING_AFTER_S,
+                        metavar="SECONDS",
+                        help=f"say a holding line ('let me have a look') once a turn has "
+                             f"taken this long, so a slow tool call isn't dead air "
+                             f"(default: {DEFAULT_HOLDING_AFTER_S:.0f}). 0 disables it.")
+    parser.add_argument("--max-budget-usd", type=float, default=None,
+                        help="stop a turn once it has cost this much (a seatbelt for "
+                             "tool turns that loop)")
+
     # --- ambient presence greeting (SPEC §7a) ---
     parser.add_argument("--ha-url", default=None,
                         help="Home Assistant base URL (e.g. http://homeassistant.local:8123). "
@@ -800,18 +910,31 @@ def main() -> None:
     args = parser.parse_args()
     args.quiet_hours = parse_quiet_hours(args.quiet_hours)
     greetings = parse_greetings(args.greeting)
+    mcp_servers = load_mcp_servers(args.mcp_config)
+    # Only switch the CLI into allowlist mode when there is something to allow;
+    # otherwise leave its defaults alone.
+    allowed_tools = None
+    if mcp_servers or args.allow_tool:
+        allowed_tools = list(BUILTIN_TOOLS) + list(args.allow_tool or [])
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
                         stream=sys.stderr)
+    if mcp_servers:
+        log.info("MCP servers: %s", ", ".join(sorted(mcp_servers)))
+        log.info("tools allowed beyond the built-ins: %s",
+                 ", ".join(args.allow_tool or []) or "(none — read-only session)")
     brain = ClaudeSessionBrain(cwd=args.brain_cwd, cli_path=args.claude_cli,
                                timeout=args.brain_timeout, memory_prompt=args.memory_prompt,
                                warm_prompt=args.warm_prompt or None, cost_log=args.cost_log,
-                               model=args.brain_model, effort=args.effort)
+                               model=args.brain_model, effort=args.effort,
+                               mcp_servers=mcp_servers, allowed_tools=allowed_tools,
+                               max_budget_usd=args.max_budget_usd)
     source, policy = build_presence(args)
     try:
         asyncio.run(_serve(brain, args.host, args.port, args.idle_timeout,
-                           source=source, policy=policy, greetings=greetings))
+                           source=source, policy=policy, greetings=greetings,
+                           holding_after_s=args.holding_after))
     except KeyboardInterrupt:
         pass
 

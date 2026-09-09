@@ -14,6 +14,7 @@ import pytest
 from clawlexa_bridge.presence import DEFAULT_GREETINGS, GreetingPolicy
 from tools.voice_agent import (
     BRAIN_ERROR_REPLY,
+    HOLDING_LINES,
     EMPTY_BRAIN_REPLY,
     Activity,
     Brain,
@@ -23,6 +24,7 @@ from tools.voice_agent import (
     VoiceIO,
     greet_on_arrival,
     is_farewell,
+    reply_with_holding_line,
     parse_greetings,
     parse_quiet_hours,
     run_voice_loop,
@@ -675,3 +677,147 @@ def test_describe_result_survives_an_unserialisable_field():
     from tools.voice_agent import describe_result
     out = describe_result(FakeResult(weird=object()))
     assert "weird" in out
+
+
+# --- MCP tools (SPEC §12 Phase 6d) ------------------------------------------
+
+def test_load_mcp_servers_reads_a_claude_style_config(tmp_path):
+    from tools.voice_agent import load_mcp_servers
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text('{"mcpServers": {"home-assistant": {"command": "node"},'
+                   ' "strava": {"type": "http", "url": "https://x/mcp"}}}')
+    servers = load_mcp_servers(str(cfg))
+    assert sorted(servers) == ["home-assistant", "strava"]
+    assert servers["strava"]["url"] == "https://x/mcp"   # http entries pass through
+
+
+def test_load_mcp_servers_is_off_by_default():
+    from tools.voice_agent import load_mcp_servers
+    assert load_mcp_servers(None) is None
+    assert load_mcp_servers("") is None
+
+
+def test_load_mcp_servers_fails_loudly_on_a_bad_path_or_shape(tmp_path):
+    """A typo'd path must stop the driver, not silently produce a toolless crab
+    nobody notices until it can't answer a question."""
+    from tools.voice_agent import load_mcp_servers
+    with pytest.raises(FileNotFoundError):
+        load_mcp_servers(str(tmp_path / "nope.json"))
+    empty = tmp_path / "empty.json"
+    empty.write_text('{"mcpServers": {}}')
+    with pytest.raises(ValueError, match="mcpServers"):
+        load_mcp_servers(str(empty))
+    wrong = tmp_path / "wrong.json"
+    wrong.write_text('{"servers": {"a": {}}}')
+    with pytest.raises(ValueError, match="mcpServers"):
+        load_mcp_servers(str(wrong))
+
+
+def test_options_carry_mcp_servers_and_tools_when_set():
+    brain = ClaudeSessionBrain(mcp_servers={"home-assistant": {"command": "node"}},
+                               allowed_tools=["Read", "mcp__home-assistant__ha_get_state"],
+                               max_budget_usd=0.5)
+    opts = brain._client_options()
+    assert opts["mcp_servers"] == {"home-assistant": {"command": "node"}}
+    assert "mcp__home-assistant__ha_get_state" in opts["allowed_tools"]
+    assert opts["max_budget_usd"] == 0.5
+
+
+def test_options_omit_tool_fields_when_unset():
+    """Absent, not empty: passing allowed_tools=[] would put the CLI into
+    allowlist mode with nothing allowed, silently disabling every tool."""
+    opts = ClaudeSessionBrain()._client_options()
+    for key in ("mcp_servers", "allowed_tools", "max_budget_usd"):
+        assert key not in opts
+
+
+def test_builtin_tools_are_kept_when_an_mcp_tool_is_allowed():
+    """Naming any tool switches the CLI to an allowlist — the built-ins have to
+    be re-added or the brain quietly loses Read, WebFetch and the rest."""
+    from tools.voice_agent import BUILTIN_TOOLS
+    allowed = list(BUILTIN_TOOLS) + ["mcp__home-assistant__ha_get_state"]
+    opts = ClaudeSessionBrain(mcp_servers={"x": {}}, allowed_tools=allowed)._client_options()
+    for builtin in ("Read", "WebFetch", "Bash", "Grep"):
+        assert builtin in opts["allowed_tools"]
+
+
+# --- the holding line (no dead air on slow tool turns) ----------------------
+
+class SlowBrain(Brain):
+    """A brain that takes `delay` seconds, like a real tool-using turn."""
+
+    def __init__(self, delay, reply="here's what I found"):
+        self.delay = delay
+        self._reply = reply
+
+    async def reply(self, transcript):
+        await asyncio.sleep(self.delay)
+        return self._reply
+
+    async def warm(self):
+        pass
+
+    async def end_session(self):
+        pass
+
+
+def test_slow_turn_speaks_a_holding_line_then_the_real_reply():
+    """The failure this prevents: a tool call takes 10s, the user hears nothing,
+    and the follow-up window expires into sleep while they wait."""
+    io = FakeVoiceIO([])
+    brain = SlowBrain(0.05)
+    out = asyncio.run(reply_with_holding_line(io, brain, "where are we with X?",
+                                              holding_after_s=0.01))
+    assert out == "here's what I found"
+    assert io.spoken == [HOLDING_LINES[0]]      # filler spoken, reply returned
+
+
+def test_fast_turn_says_nothing_extra():
+    io = FakeVoiceIO([])
+    out = asyncio.run(reply_with_holding_line(io, SlowBrain(0), "hello",
+                                              holding_after_s=5))
+    assert out == "here's what I found"
+    assert io.spoken == []
+
+
+def test_holding_lines_rotate_across_turns():
+    io = FakeVoiceIO([])
+    for i in range(len(HOLDING_LINES)):
+        asyncio.run(reply_with_holding_line(io, SlowBrain(0.02), "q",
+                                            holding_after_s=0.01, holding_index=i))
+    assert io.spoken == list(HOLDING_LINES)     # no stuck record on a slow run
+
+
+def test_a_failed_holding_line_never_costs_us_the_reply():
+    """Device unplugged mid-turn: the filler fails, the answer still arrives."""
+    io = FakeVoiceIO([])
+
+    async def boom(text):
+        raise RuntimeError("no device connected")
+
+    io.speak = boom
+    out = asyncio.run(reply_with_holding_line(io, SlowBrain(0.05), "q",
+                                              holding_after_s=0.01))
+    assert out == "here's what I found"
+
+
+def test_brain_errors_still_surface_through_the_holding_path():
+    class Boom(SlowBrain):
+        async def reply(self, transcript):
+            await asyncio.sleep(0.02)
+            raise BrainError("api timeout")
+
+    io = FakeVoiceIO([])
+    with pytest.raises(BrainError):
+        asyncio.run(reply_with_holding_line(io, Boom(0), "q", holding_after_s=0.01))
+
+
+def test_bridge_reply_cap_sits_above_the_drivers_own_timeout():
+    """Ordering matters and the two live in different processes: if the bridge's
+    net fires first it re-arms the wake word before the agent can speak its
+    error, and the user is left with a crab that went to sleep mid-look-up."""
+    from clawlexa_bridge.conversation import DEFAULT_REPLY_TIMEOUT_S
+    driver_default_brain_timeout = 120.0   # voice_agent's --brain-timeout default
+    assert DEFAULT_REPLY_TIMEOUT_S > driver_default_brain_timeout
+    # and with headroom for a tool turn, not by a whisker
+    assert DEFAULT_REPLY_TIMEOUT_S >= 2 * driver_default_brain_timeout

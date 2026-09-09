@@ -34,7 +34,13 @@ from typing import Callable
 # path closes the turn (a spoken reply -> play_end) rather than this safety net
 # firing mid-think and re-arming the wake word before the reply lands.
 DEFAULT_WINDOW_S = 12.0
-DEFAULT_REPLY_TIMEOUT_S = 150.0
+# Must stay ABOVE the voice driver's own per-turn timeout (voice_agent's
+# --brain-timeout), so the agent's error path speaks before this net fires and
+# re-arms the wake word. Raised for tool-using turns (SPEC §12 Phase 6d): reading
+# a doc or querying the house takes seconds to minutes, and the two live in
+# different processes — raise one without the other and the crab goes to sleep
+# while it is still working.
+DEFAULT_REPLY_TIMEOUT_S = 300.0
 
 
 class Conversation:
