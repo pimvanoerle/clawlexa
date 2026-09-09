@@ -135,6 +135,19 @@ target_link_libraries(test_wake_gate PRIVATE unity)
 add_test(NAME test_wake_gate COMMAND test_wake_gate)
 # -----------------------------------------------------------------------
 
+# --- test_wake_window ---------------------------------------------------
+# Pure sliding-window wake verdict + refractory (Phase 4c), no TFLite deps.
+add_executable(test_wake_window
+    test_wake_window.c
+    "${FIRMWARE_MAIN}/wake_window.c"
+)
+target_include_directories(test_wake_window PRIVATE
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_wake_window PRIVATE unity)
+add_test(NAME test_wake_window COMMAND test_wake_window)
+# -----------------------------------------------------------------------
+
 # --- test_pcm_carry -----------------------------------------------------
 # Pure PCM reassembly across arbitrary byte chunks (the crackle bug).
 add_executable(test_pcm_carry

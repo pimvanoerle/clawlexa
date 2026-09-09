@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "esp_heap_caps.h"
@@ -18,6 +19,7 @@
 
 #include "wake_models/audio_preprocessor_int8_model_data.h"  // g_audio_preprocessor_int8_tflite
 #include "wake_stats.h"
+#include "wake_window.h"
 
 static const char *TAG = "wake";
 
@@ -52,22 +54,35 @@ extern const uint8_t vad_start[] asm("_binary_vad_tflite_start");
  *   3. Point the three macros below at it (symbol, label, and the manifest's
  *      probability_cutoff). The default is the zero-setup bring-up word.
  * The symbol is "_binary_<file>_tflite_start" for "<file>.tflite". */
-/* The generic build stays on the zero-setup bring-up word, so a clone works out
- * of the box without adopting anyone's pet name for their crab (SPEC §2, §7).
+/* The wake phrases this build listens for (SPEC §7, Phase 4c).
  *
- * `hey_pinchy` is embedded alongside it as a worked example of the swap — the
- * iPinch build uses it by pointing these three macros at it instead:
- *     #define WAKE_MODEL_START   hey_pinchy_start
- *     #define WAKE_WORD_LABEL    "hey pinchy"
- *     #define WAKE_CUTOFF        0.50f    // from hey_pinchy.json
- * Note the cutoff travels with the model: 0.50 is what that one was tuned and
- * benchmarked at (77.2% recall, 0.76 false accepts/hour), not a weaker setting
- * than okay_nabu's 0.97. Phase 4c replaces this single choice with a table so
- * several phrases can be live at once. */
-#define WAKE_MODEL_START   okay_nabu_start
-#define WAKE_WORD_LABEL    "okay nabu"
-#define WAKE_CUTOFF        0.97f   /* from the model's .json manifest */
-#define WAKE_SLIDING_WINDOW 5
+ * microWakeWord is one model per phrase, so several phrases means several models
+ * fed the same feature stream, OR-ed — each with the cutoff and window from its
+ * OWN manifest. The cutoff genuinely differs per model (okay_nabu 0.97,
+ * hey_pinchy 0.50); it is a property of how that model was trained and
+ * benchmarked, not a strictness dial to be harmonised.
+ *
+ * CPU is what bounds the list: every model runs on every 10 ms slice. The load
+ * meter reports the share used, so check it after adding one — measured at ~30%
+ * for one phrase plus the VAD gate, and ~12% per additional phrase.
+ *
+ * To add a phrase: train it (training/README.md), drop the .tflite in
+ * wake_models/, add it to EMBED_FILES, declare its symbol above, and add a row
+ * here. The generic build ships only the zero-setup bring-up word so a clone
+ * works out of the box without adopting anyone's pet name for their crab. */
+struct WakePhrase {
+    const uint8_t *model_start;
+    const char *label;
+    float cutoff;       /* probability_cutoff from the model's .json */
+    int window;         /* sliding_window_size from the same manifest */
+};
+
+static const WakePhrase WAKE_PHRASES[] = {
+    { okay_nabu_start,  "okay nabu",  0.97f, 5 },
+    /* An iPinch build adds its own phrases here, e.g.:
+     *   { hey_pinchy_start, "hey pinchy", 0.50f, 5 },
+     * Measured on device: one phrase + VAD is ~30% of the 10 ms slice, two 42%. */
+};
 /* ========================================================================= */
 
 namespace {
@@ -113,8 +128,9 @@ class StreamModel {
             return false;
         }
         stride_ = interp_->input(0)->dims->data[1];
-        recent_.assign(window_, 0);
-        ignore_ = -MIN_SLICES_BEFORE_DETECTION;
+        win_storage_.assign((size_t) window_, 0);
+        wake_window_init(&win_, win_storage_.data(), window_, cutoff_,
+                         MIN_SLICES_BEFORE_DETECTION);
         ESP_LOGI(TAG, "streaming model loaded: stride=%d arena_used=%u cutoff=%u win=%d",
                  stride_, (unsigned) interp_->arena_used_bytes(), cutoff_, window_);
         return true;
@@ -134,43 +150,26 @@ class StreamModel {
                 return;
             }
             wake_stats_add(&stats_, (uint32_t)(esp_timer_get_time() - t0));
-            last_idx_ = (last_idx_ + 1) % window_;
-            recent_[last_idx_] = interp_->output(0)->data.uint8[0];
+            wake_window_push(&win_, interp_->output(0)->data.uint8[0]);
             have_new_ = true;
-        }
-        if (recent_[last_idx_] < cutoff_) {
-            ignore_ = std::min(ignore_ + 1, 0);  // cool-off climbs back to 0
         }
     }
 
     bool consume_new() { bool n = have_new_; have_new_ = false; return n; }
 
-    /* Sliding-window average over cutoff, respecting the refractory window. */
-    bool detected() const {
-        if (ignore_ < 0) return false;
-        return windowed_sum_() > (uint32_t) cutoff_ * window_;
-    }
-
-    /* VAD variant: no refractory, just the windowed average. */
-    bool active() const { return windowed_sum_() > (uint32_t) cutoff_ * window_; }
-
-    uint8_t latest() const { return recent_[last_idx_]; }
+    /* The verdict lives in wake_window (pure, host-tested): a sliding-window
+     * average over this model's own cutoff, plus a refractory period so one
+     * spoken phrase fires once. Each phrase carries its own cutoff. */
+    bool detected() const { return wake_window_fired(&win_); }
+    bool active() const { return wake_window_active(&win_); }
+    uint8_t latest() const { return wake_window_latest(&win_); }
 
     const char *name() const { return name_; }
     wake_stage_stats_t *stats() { return &stats_; }
 
-    void reset() {
-        std::fill(recent_.begin(), recent_.end(), 0);
-        ignore_ = -MIN_SLICES_BEFORE_DETECTION;
-    }
+    void reset() { wake_window_reset(&win_); }
 
  private:
-    uint32_t windowed_sum_() const {
-        uint32_t sum = 0;
-        for (uint8_t p : recent_) sum += p;
-        return sum;
-    }
-
     void register_ops_() {
         resolver_.AddCallOnce();        resolver_.AddVarHandle();
         resolver_.AddReshape();         resolver_.AddReadVariable();
@@ -196,9 +195,8 @@ class StreamModel {
     tflite::MicroMutableOpResolver<20> resolver_;
     int stride_ = 1;
     int stride_step_ = 0;
-    std::vector<uint8_t> recent_;
-    int last_idx_ = 0;
-    int ignore_ = -MIN_SLICES_BEFORE_DETECTION;
+    std::vector<uint8_t> win_storage_;
+    mutable wake_window_t win_ = {};
     bool have_new_ = false;
 };
 
@@ -210,8 +208,9 @@ tflite::MicroMutableOpResolver<18> g_prep_resolver;
 std::unique_ptr<tflite::MicroInterpreter> g_prep_interp;
 std::vector<int16_t> g_samples;  // sample accumulator across feed() calls
 
-StreamModel g_wake(WAKE_MODEL_START, WAKE_CUTOFF, WAKE_SLIDING_WINDOW, 96 * 1024,
-                   WAKE_WORD_LABEL);
+/* One model per phrase, all fed the same slices. unique_ptr because
+ * StreamModel owns an interpreter and its arenas. */
+std::vector<std::unique_ptr<StreamModel>> g_wakes;
 StreamModel g_vad(vad_start, 0.50f, 5, 96 * 1024, "vad");
 
 /* Preprocessor cost and the slice counter the per-slice figures divide by. */
@@ -265,8 +264,17 @@ void generate_feature_(const int16_t *window, int8_t out[FEATURE_SIZE]) {
  * cheap per slice however expensive each invoke is. */
 void report_load_() {
     const uint32_t prep = wake_stats_per_slice_us(&g_prep_stats, g_slices);
-    const uint32_t wake = wake_stats_per_slice_us(g_wake.stats(), g_slices);
     const uint32_t vad  = wake_stats_per_slice_us(g_vad.stats(), g_slices);
+    uint32_t wake = 0;
+    std::string per_word;
+    for (auto &m : g_wakes) {
+        const uint32_t us = wake_stats_per_slice_us(m->stats(), g_slices);
+        wake += us;
+        char buf[64];
+        snprintf(buf, sizeof(buf), " | %s %luus (max %lu)", m->name(),
+                 (unsigned long) us, (unsigned long) m->stats()->max_us);
+        per_word += buf;
+    }
     const uint32_t total = prep + wake + vad;
     ESP_LOGI(TAG,
              /* No %ll here: ESP-IDF builds with newlib's *nano* formatting, which
@@ -274,17 +282,19 @@ void report_load_() {
               * varargs and the following %s then dereferences garbage — this
               * crashed the device (LoadProhibited) every time the first report
               * fired. Everything below fits in unsigned long anyway. */
-             "load: %lu%% of %luus slice | prep %luus (max %lu) | %s %luus (max %lu) "
+             "load: %lu%% of %luus slice | prep %luus (max %lu)%s "
              "| vad %luus (max %lu) | headroom %luus",
              (unsigned long) wake_stats_budget_pct(total, SLICE_BUDGET_US),
              (unsigned long) SLICE_BUDGET_US,
              (unsigned long) prep, (unsigned long) g_prep_stats.max_us,
-             g_wake.name(), (unsigned long) wake, (unsigned long) g_wake.stats()->max_us,
+             per_word.c_str(),
              (unsigned long) vad, (unsigned long) g_vad.stats()->max_us,
              (unsigned long) (total < SLICE_BUDGET_US ? SLICE_BUDGET_US - total : 0));
     g_slices = 0;
     wake_stats_reset(&g_prep_stats);
-    wake_stats_reset(g_wake.stats());
+    for (auto &m : g_wakes) {
+        wake_stats_reset(m->stats());
+    }
     wake_stats_reset(g_vad.stats());
 }
 
@@ -292,10 +302,25 @@ void report_load_() {
 
 extern "C" bool wake_detector_init(void) {
     if (!init_preprocessor_()) return false;
-    if (!g_wake.load() || !g_vad.load()) return false;
+    for (const WakePhrase &p : WAKE_PHRASES) {
+        auto m = std::make_unique<StreamModel>(p.model_start, p.cutoff, p.window,
+                                               96 * 1024, p.label);
+        if (!m->load()) {
+            ESP_LOGE(TAG, "failed to load wake model '%s'", p.label);
+            return false;
+        }
+        g_wakes.push_back(std::move(m));
+    }
+    if (g_wakes.empty() || !g_vad.load()) return false;
     g_samples.reserve(WINDOW_SAMPLES * 4);
     g_ready = true;
-    ESP_LOGI(TAG, "wake detector ready (%s + vad)", WAKE_WORD_LABEL);
+
+    std::string words;
+    for (const auto &m : g_wakes) {
+        if (!words.empty()) words += ", ";
+        words += m->name();
+    }
+    ESP_LOGI(TAG, "wake detector ready (%s + vad)", words.c_str());
     return true;
 }
 
@@ -307,16 +332,29 @@ extern "C" bool wake_detector_feed(const int16_t *samples, size_t count) {
     while (g_samples.size() - pos >= WINDOW_SAMPLES) {
         int8_t feats[FEATURE_SIZE];
         generate_feature_(g_samples.data() + pos, feats);
-        g_wake.infer(feats);
+        for (auto &m : g_wakes) {
+            m->infer(feats);
+        }
         g_vad.infer(feats);
-        if (g_wake.consume_new() && g_wake.detected()) {
-            if (g_vad.active()) {
-                ESP_LOGI(TAG, "WAKE: %s (p=%u)", WAKE_WORD_LABEL, g_wake.latest());
-                fired = true;
-            } else {
-                ESP_LOGD(TAG, "wake blocked by vad (p=%u)", g_wake.latest());
+        /* Every phrase gets consume_new() called so its "fresh probability" flag
+         * clears whether or not an earlier phrase already fired this slice. */
+        for (auto &m : g_wakes) {
+            if (!(m->consume_new() && m->detected())) {
+                continue;
             }
-            g_wake.reset();
+            if (g_vad.active()) {
+                ESP_LOGI(TAG, "WAKE: %s (p=%u)", m->name(), m->latest());
+                fired = true;
+                /* Reset them all: the phrases overlap acoustically, so a second
+                 * one firing on the tail of the first would be the same
+                 * utterance counted twice. */
+                for (auto &other : g_wakes) {
+                    other->reset();
+                }
+                break;
+            }
+            ESP_LOGD(TAG, "wake blocked by vad: %s (p=%u)", m->name(), m->latest());
+            m->reset();
         }
         pos += STRIDE_SAMPLES;  // 10 ms hop
         if (++g_slices >= STATS_EVERY_SLICES) {

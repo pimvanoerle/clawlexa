@@ -16,6 +16,7 @@ idf_component_register(
         "pcm_ring.c"
         "pcm_carry.c"
         "wake_stats.c"
+        "wake_window.c"
         "wav.c"
         "mic.c"
         "mic_sample.c"
