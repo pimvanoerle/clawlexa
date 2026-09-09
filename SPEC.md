@@ -454,6 +454,15 @@ Nothing in here yet — created as each phase starts.
       Extract the sliding-window verdict (probabilities in, fired/not out) into a
       pure host-tested core while doing (c) — it is the one piece of this that
       does not need a board, and it is currently welded inside `StreamModel`.
+      **(a) done 2026-09-09.** Measured baseline, two models: **30% of the 10 ms
+      slice** — preprocessor 1168 us, `okay nabu` 1208 us, VAD 720 us, leaving
+      ~6.9 ms headroom. An extra wake model costs ~1.2 ms/slice (~12%), so three
+      phrases plus VAD lands near **54%** and roughly five more would saturate.
+      Take the average as the budget, not the worst case: every model shares
+      `stride=3`, so their invokes align and the busy slice is already ~7 ms
+      typical (13 ms at the observed maxima). That overshoot is absorbed because
+      the mic delivers 16 ms frames into a sample backlog — which is exactly why
+      the target should be comfortable average headroom, not a filled budget.
 - [~] **Phase 6b** — Conversation flow: a wake opens a multi-turn window so
       follow-ups need no re-wake. Conversation end is **bridge-driven** (the
       bridge sends `end_turn` after ~12 s of real silence, or immediately on a

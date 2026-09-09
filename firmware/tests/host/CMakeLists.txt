@@ -135,6 +135,19 @@ target_link_libraries(test_wake_gate PRIVATE unity)
 add_test(NAME test_wake_gate COMMAND test_wake_gate)
 # -----------------------------------------------------------------------
 
+# --- test_wake_stats ----------------------------------------------------
+# Pure wake-path timing arithmetic (Phase 4c), no IDF/TFLite deps.
+add_executable(test_wake_stats
+    test_wake_stats.c
+    "${FIRMWARE_MAIN}/wake_stats.c"
+)
+target_include_directories(test_wake_stats PRIVATE
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_wake_stats PRIVATE unity)
+add_test(NAME test_wake_stats COMMAND test_wake_stats)
+# -----------------------------------------------------------------------
+
 # --- test_pcm_ring ------------------------------------------------------
 # Pure SPSC PCM ring buffer (audio smoothing), no IDF/IO deps.
 add_executable(test_pcm_ring

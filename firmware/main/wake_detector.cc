@@ -7,6 +7,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/micro/micro_allocator.h"
@@ -16,6 +17,7 @@
 #include "tensorflow/lite/schema/schema_generated.h"
 
 #include "wake_models/audio_preprocessor_int8_model_data.h"  // g_audio_preprocessor_int8_tflite
+#include "wake_stats.h"
 
 static const char *TAG = "wake";
 
@@ -27,6 +29,14 @@ static const char *TAG = "wake";
 /* Refractory: suppress detections until this many sub-cutoff slices have passed
  * (after load and after each detection), so one utterance fires once. */
 #define MIN_SLICES_BEFORE_DETECTION 100
+/* Every slice must finish inside the feature cadence or detection falls behind
+ * real time. STRIDE_SAMPLES at 16 kHz = 10 ms, and that is the whole budget the
+ * preprocessor and every streaming model share (SPEC §7, Phase 4c). */
+#define SLICE_BUDGET_US   (STRIDE_SAMPLES * 1000000 / 16000)
+/* How often to report. ~30 s at one slice per 10 ms — often enough to watch a
+ * model being added, rare enough not to bury the log. */
+#define STATS_EVERY_SLICES 3000
+
 #define VAR_ARENA_SIZE 1024
 #define PREPROCESSOR_ARENA_SIZE (16 * 1024)
 
@@ -59,8 +69,10 @@ constexpr uint8_t quantize_cutoff(float cutoff) {
  * sliding window of probabilities. Mirrors ESPHome's StreamingModel. */
 class StreamModel {
  public:
-    StreamModel(const uint8_t *model_start, float cutoff, int window, size_t arena_size)
-        : model_start_(model_start),
+    StreamModel(const uint8_t *model_start, float cutoff, int window, size_t arena_size,
+                const char *name = "model")
+        : name_(name),
+          model_start_(model_start),
           cutoff_(quantize_cutoff(cutoff)),
           window_(window),
           arena_size_(arena_size) {}
@@ -103,10 +115,12 @@ class StreamModel {
         std::memmove(tflite::GetTensorData<int8_t>(input) + FEATURE_SIZE * stride_step_, feats, FEATURE_SIZE);
         ++stride_step_;
         if (stride_step_ >= stride_) {
+            const int64_t t0 = esp_timer_get_time();
             if (interp_->Invoke() != kTfLiteOk) {
                 ESP_LOGW(TAG, "invoke failed");
                 return;
             }
+            wake_stats_add(&stats_, (uint32_t)(esp_timer_get_time() - t0));
             last_idx_ = (last_idx_ + 1) % window_;
             recent_[last_idx_] = interp_->output(0)->data.uint8[0];
             have_new_ = true;
@@ -128,6 +142,9 @@ class StreamModel {
     bool active() const { return windowed_sum_() > (uint32_t) cutoff_ * window_; }
 
     uint8_t latest() const { return recent_[last_idx_]; }
+
+    const char *name() const { return name_; }
+    wake_stage_stats_t *stats() { return &stats_; }
 
     void reset() {
         std::fill(recent_.begin(), recent_.end(), 0);
@@ -154,6 +171,8 @@ class StreamModel {
         resolver_.AddPack();            resolver_.AddSplitV();
     }
 
+    const char *name_;
+    wake_stage_stats_t stats_ = {};
     const uint8_t *model_start_;
     uint8_t cutoff_;
     int window_;
@@ -178,8 +197,13 @@ tflite::MicroMutableOpResolver<18> g_prep_resolver;
 std::unique_ptr<tflite::MicroInterpreter> g_prep_interp;
 std::vector<int16_t> g_samples;  // sample accumulator across feed() calls
 
-StreamModel g_wake(WAKE_MODEL_START, WAKE_CUTOFF, WAKE_SLIDING_WINDOW, 96 * 1024);
-StreamModel g_vad(vad_start, 0.50f, 5, 96 * 1024);
+StreamModel g_wake(WAKE_MODEL_START, WAKE_CUTOFF, WAKE_SLIDING_WINDOW, 96 * 1024,
+                   WAKE_WORD_LABEL);
+StreamModel g_vad(vad_start, 0.50f, 5, 96 * 1024, "vad");
+
+/* Preprocessor cost and the slice counter the per-slice figures divide by. */
+wake_stage_stats_t g_prep_stats = {};
+uint32_t g_slices = 0;
 bool g_ready = false;
 
 bool init_preprocessor_() {
@@ -212,11 +236,43 @@ bool init_preprocessor_() {
 void generate_feature_(const int16_t *window, int8_t out[FEATURE_SIZE]) {
     TfLiteTensor *input = g_prep_interp->input(0);
     std::copy_n(window, WINDOW_SAMPLES, tflite::GetTensorData<int16_t>(input));
+    const int64_t t0 = esp_timer_get_time();
     if (g_prep_interp->Invoke() != kTfLiteOk) {
         ESP_LOGW(TAG, "preprocessor invoke failed");
         return;
     }
+    wake_stats_add(&g_prep_stats, (uint32_t)(esp_timer_get_time() - t0));
     std::copy_n(tflite::GetTensorData<int8_t>(g_prep_interp->output(0)), FEATURE_SIZE, out);
+}
+
+/* How much of the 10 ms slice the detector is using, and where it goes. This is
+ * the number that decides how many wake phrases fit (Phase 4c): every model runs
+ * on every slice, so the answer is (budget - current) / cost-per-model. Logged
+ * per slice rather than per invoke — a model that invokes every 3rd slice is
+ * cheap per slice however expensive each invoke is. */
+void report_load_() {
+    const uint32_t prep = wake_stats_per_slice_us(&g_prep_stats, g_slices);
+    const uint32_t wake = wake_stats_per_slice_us(g_wake.stats(), g_slices);
+    const uint32_t vad  = wake_stats_per_slice_us(g_vad.stats(), g_slices);
+    const uint32_t total = prep + wake + vad;
+    ESP_LOGI(TAG,
+             /* No %ll here: ESP-IDF builds with newlib's *nano* formatting, which
+              * does not implement 64-bit specifiers. A stray %llu misparses the
+              * varargs and the following %s then dereferences garbage — this
+              * crashed the device (LoadProhibited) every time the first report
+              * fired. Everything below fits in unsigned long anyway. */
+             "load: %lu%% of %luus slice | prep %luus (max %lu) | %s %luus (max %lu) "
+             "| vad %luus (max %lu) | headroom %luus",
+             (unsigned long) wake_stats_budget_pct(total, SLICE_BUDGET_US),
+             (unsigned long) SLICE_BUDGET_US,
+             (unsigned long) prep, (unsigned long) g_prep_stats.max_us,
+             g_wake.name(), (unsigned long) wake, (unsigned long) g_wake.stats()->max_us,
+             (unsigned long) vad, (unsigned long) g_vad.stats()->max_us,
+             (unsigned long) (total < SLICE_BUDGET_US ? SLICE_BUDGET_US - total : 0));
+    g_slices = 0;
+    wake_stats_reset(&g_prep_stats);
+    wake_stats_reset(g_wake.stats());
+    wake_stats_reset(g_vad.stats());
 }
 
 }  // namespace
@@ -250,6 +306,9 @@ extern "C" bool wake_detector_feed(const int16_t *samples, size_t count) {
             g_wake.reset();
         }
         pos += STRIDE_SAMPLES;  // 10 ms hop
+        if (++g_slices >= STATS_EVERY_SLICES) {
+            report_load_();
+        }
     }
     g_samples.erase(g_samples.begin(), g_samples.begin() + pos);  // keep the tail
     return fired;
