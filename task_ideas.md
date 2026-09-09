@@ -420,3 +420,32 @@ When a task is T5-only at face value, decompose it: list the device-free slices
   failure path are Layer-3 testable against a fake brain that hangs, raises, or
   exhausts a budget (`tests/test_voice_agent.py` already fakes a brain); the
   window-holding is a `Conversation` unit test. Only "does it sound right" is T5.
+
+### WW-4 — Several wake phrases on one device
+- **Anchor:** after Phase 6d (tools); extends the Phase 4 wake word work.
+- **Prompt:** "The crab answers to one wake word. Let it answer to several — 'hey
+  pinchy', 'hey iPinch', 'iPinch' — without wrecking the CPU budget it shares
+  with WiFi, the display and the audio path."
+- **Done-correctly:** microWakeWord is one model per phrase, so this is N models
+  fed the same feature stream, OR-ed, each with its own cutoff — not one model
+  trained on every phrasing (cheaper at runtime, but a broader decision boundary
+  and no per-phrase tuning). The detector grows from a `#define`'d single model
+  to a table of {model, cutoff, window, name} and reports *which* phrase fired.
+  The tell of a good answer is the **order of work**: measure the slice budget
+  first, prove the training pipeline with one phrase second, generalise third.
+- **Footguns:** (a) reaching for RAM or flash as the limit — both are fine
+  (arenas are in PSRAM, ~1 KB internal each; models are ~59 KB against ~1.4 MB
+  free). **CPU is the limit**: every model runs on every 10 ms slice, so the
+  question is how many fit in the cadence, and nothing measures that today.
+  (b) Training three models before proving that *one* custom model runs on the
+  device at all — no custom model ever has, and upstream is explicit that it
+  takes iteration. (c) Accepting a bare two-syllable phrase (`iPinch`) on the
+  same footing as the others: no carrier, and it collides with ordinary speech,
+  so it needs a measured false-accept rate before it earns a slot. (d) Adding
+  models without a load metric, so the first sign of trouble is the task
+  watchdog — which this repo has already been bitten by once.
+- **Device-free slices:** the sliding-window verdict (probabilities in,
+  fired/not out) is currently welded inside `StreamModel` and is pure once
+  extracted — feed it canned probability sequences and assert the fire/no-fire
+  boundary and the window behaviour, no board and no model needed. The table
+  wiring compiles without hardware. Everything about *detection quality* is T5.

@@ -201,6 +201,24 @@ Candidates:
   and returns to LISTENING when the conversation ends. The transition logic is a
   pure, host-tested core (`wake_gate`); the detector and the IO (start/stop
   streaming) are the swappable edges.
+- **Multiple wake phrases (Phase 4c).** One device, several ways to summon it —
+  e.g. `hey pinchy`, `hey iPinch`, `iPinch`. microWakeWord is one model per
+  phrase, so this is **N models OR-ed**: each phrase trained and tuned
+  independently with its own cutoff, all fed the same feature stream, and the
+  first to cross its threshold wins. The alternative — one model trained on every
+  phrasing — costs one inference instead of N, but broadens the decision boundary
+  and forfeits per-phrase tuning, which matters most when the phrases differ in
+  length. ESPHome takes the N-model route too.
+  The structure already suits it: `StreamModel` is a class and the firmware
+  already runs **two** models (the wake word plus a VAD gate); arenas live in
+  PSRAM (only ~1 KB of internal RAM each) and models are ~59 KB of flash against
+  ~1.4 MB free. So neither RAM nor flash is the limit — **CPU is**. Each slice
+  runs every model, so N is bounded by what fits in the 10 ms feature cadence
+  alongside WiFi, LVGL and the audio path. That budget is currently unmeasured,
+  which is why Phase 4c starts by measuring it rather than by adding models.
+  Short phrases are the risk, not the cost: a bare two-syllable `iPinch` has no
+  carrier and collides with ordinary speech ("pinch"), so it earns its slot only
+  if the measured false-accept rate says it does — see §7's 3-syllable note.
 - **Multi-turn conversation window (Phase 6b).** A wake opens a *conversation*,
   not a single turn: after the agent's reply plays, the mic keeps streaming for a
   follow-up window (~12 s) so the user can continue without repeating the
@@ -421,6 +439,21 @@ Nothing in here yet — created as each phase starts.
       dead-zone right after a reply — taps are dropped during the half-duplex
       mute tail (~300 ms past playback); fix is to queue the tap (don't clear the
       flag while muted) so it fires when the mute clears.
+- [ ] **Phase 4c** — Multiple wake phrases (§7). Sequenced so the unknown comes
+      first: (a) **instrument** the wake path — per-model inference time and the
+      share of the 10 ms slice budget consumed — so "how many models fit" is
+      measured, not guessed, and a regression is visible; (b) **prove the trainer
+      end-to-end** with a single custom phrase (`hey pinchy`) swapped in for
+      `okay nabu` — no custom model has ever run on the device, and the training
+      README warns it takes iteration, so doing that once beats doing it three
+      times blind; (c) generalise the detector from one `#define`'d model to a
+      **table** of {model, cutoff, window, name}, returning *which* phrase fired
+      (useful later — the crab could answer differently to its formal name than
+      its nickname); (d) add phrases while watching the measured load, and let
+      the false-accept rate decide whether a bare `iPinch` earns its slot.
+      Extract the sliding-window verdict (probabilities in, fired/not out) into a
+      pure host-tested core while doing (c) — it is the one piece of this that
+      does not need a board, and it is currently welded inside `StreamModel`.
 - [~] **Phase 6b** — Conversation flow: a wake opens a multi-turn window so
       follow-ups need no re-wake. Conversation end is **bridge-driven** (the
       bridge sends `end_turn` after ~12 s of real silence, or immediately on a
@@ -496,7 +529,8 @@ A single list to make easy to triage; each links to its section above.
       (§12 Phase 6d). v1 forbids it: one utterance, one reply, no going away and
       coming back.
 - [ ] Wake-word engine: microWakeWord vs ESP-Skainet (§7)
-- [ ] Actual wake word phrase (§7)
+- [ ] Actual wake word phrase (§7) — and how many, once Phase 4c has measured
+      what the CPU budget allows
 - [x] ~~On-device UI framework~~ → LVGL via `esp_lvgl_port` (§8)
 - [x] ~~Firmware framework~~ → ESP-IDF + `idf.py`, v5.4+ (§9)
 - [x] ~~Bridge language~~ → Python, shipped as a one-shot script for v1 (§10)
