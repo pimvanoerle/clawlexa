@@ -14,6 +14,7 @@ idf_component_register(
         "audio.c"
         "audio_tone.c"
         "pcm_ring.c"
+        "pcm_carry.c"
         "wake_stats.c"
         "wav.c"
         "mic.c"

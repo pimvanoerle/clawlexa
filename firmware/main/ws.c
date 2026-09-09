@@ -21,6 +21,7 @@
 #include "mic.h"
 #include "mic_gate.h"
 #include "wake_detector.h"
+#include "pcm_carry.h"
 #include "wake_gate.h"
 
 static const char *TAG = "ws";
@@ -49,6 +50,12 @@ static volatile bool s_streaming;  /* true while a wake-triggered conversation i
 static volatile int s_send_fails;  /* consecutive mic-send failures (zombie-socket detection) */
 static volatile bool s_tap_pending;  /* set by ws_on_tap() from the touch task */
 static volatile bool s_remote_wake;  /* set on start_turn: the bridge wants a listening window */
+
+/* PCM arrives in whatever chunks the WebSocket client produces, which are often
+ * odd-length; pcm_carry stitches whole samples back out of them. The scratch is
+ * static (not stack) because this runs on the ws event task. */
+static pcm_carry_t s_pcm_carry;
+static int16_t s_pcm_scratch[512];
 
 void ws_on_tap(void) {
     s_tap_pending = true;
@@ -100,6 +107,7 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data
             /* Bracket the clip for the playback buffer: play_begin arms it and
              * drops anything stale, play_end lets it drain and report (SPEC §6). */
             if (strstr(ctrl, "play_begin") != NULL) {
+                pcm_carry_reset(&s_pcm_carry);  /* no half sample across clips */
                 audio_play_begin();
             } else if (strstr(ctrl, "play_end") != NULL) {
                 audio_play_end();
@@ -153,16 +161,26 @@ static void on_ws_event(void *arg, esp_event_base_t base, int32_t id, void *data
             }
         } else if ((e->op_code == WS_BIN_OPCODE || e->op_code == WS_CONT_OPCODE) &&
                    e->data_len >= 2) {
-            /* PCM is 16-bit: an odd-length payload is half a sample. Dropping
-             * the stray byte byte-shifts every sample after it, which is a
-             * plausible source of the occasional crackle — so say so rather
-             * than swallowing it. (A 1-byte fragment is already skipped by the
-             * >= 2 guard above, with the same effect.) */
-            if ((e->data_len & 1) != 0) {
-                ESP_LOGW(TAG, "odd PCM payload (%d bytes) — sample alignment may shift",
-                         e->data_len);
+            /* Carry any half sample across chunk boundaries. Measured live:
+             * a 1024-byte frame arrived as 209 + 815 bytes, and taking len/2
+             * from each dropped a byte and byte-shifted everything after —
+             * the intermittent crackle. */
+            const uint8_t *p = (const uint8_t *) e->data_ptr;
+            size_t left = (size_t) e->data_len;
+            while (left > 0) {
+                size_t used = 0;
+                size_t n = pcm_carry_feed(&s_pcm_carry, p, left, s_pcm_scratch,
+                                          sizeof(s_pcm_scratch) / sizeof(s_pcm_scratch[0]),
+                                          &used);
+                if (n > 0) {
+                    audio_play_pcm(s_pcm_scratch, n);
+                }
+                if (used == 0) {
+                    break;  /* nothing consumable (a lone byte, now carried) */
+                }
+                p += used;
+                left -= used;
             }
-            audio_play_pcm((const int16_t *)e->data_ptr, e->data_len / 2);
         }
         break;
     case WEBSOCKET_EVENT_DISCONNECTED:

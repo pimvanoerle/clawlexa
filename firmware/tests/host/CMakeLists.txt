@@ -135,6 +135,19 @@ target_link_libraries(test_wake_gate PRIVATE unity)
 add_test(NAME test_wake_gate COMMAND test_wake_gate)
 # -----------------------------------------------------------------------
 
+# --- test_pcm_carry -----------------------------------------------------
+# Pure PCM reassembly across arbitrary byte chunks (the crackle bug).
+add_executable(test_pcm_carry
+    test_pcm_carry.c
+    "${FIRMWARE_MAIN}/pcm_carry.c"
+)
+target_include_directories(test_pcm_carry PRIVATE
+    "${FIRMWARE_MAIN}/include"
+)
+target_link_libraries(test_pcm_carry PRIVATE unity)
+add_test(NAME test_pcm_carry COMMAND test_pcm_carry)
+# -----------------------------------------------------------------------
+
 # --- test_wake_stats ----------------------------------------------------
 # Pure wake-path timing arithmetic (Phase 4c), no IDF/TFLite deps.
 add_executable(test_wake_stats
