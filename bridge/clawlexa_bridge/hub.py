@@ -65,10 +65,17 @@ class Hub:
             log.info("coalesced %d backlogged utterances", len(parts))
         return " ".join(p.strip() for p in parts if p.strip())
 
-    async def speak(self, text: str) -> None:
+    async def speak(self, text: str, more: bool = False) -> None:
         """Synthesize `text`, play it on the device, and return once it has
         ~finished playing — so the agent stays 'speaking' for the whole clip and
-        doesn't re-listen over its own voice (half-duplex)."""
+        doesn't re-listen over its own voice (half-duplex).
+
+        `more=True` means "this isn't the answer, I'm still working" — a holding
+        line while a tool call runs. Without it the conversation treats any
+        speech as the finished reply and starts the follow-up silence timer, so
+        a slow turn re-armed the wake word *mid-lookup* and the real answer
+        played to a crab that had already gone to sleep.
+        """
         ws = self._require_ws()
         wav = await asyncio.to_thread(self._tts.synthesize, text)
         # Bracket the reply so the conversation window doesn't re-arm mid-speech
@@ -80,7 +87,8 @@ class Hub:
             play_s = w.getnframes() / w.getframerate()
         await asyncio.sleep(play_s)
         if self._conv is not None:
-            self._conv.reply_finished(has_more=not self._utterances.empty())
+            self._conv.reply_finished(
+                has_more=more or not self._utterances.empty())
         log.info('spoke: "%s"', text)
 
     async def end_conversation(self) -> None:

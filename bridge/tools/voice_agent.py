@@ -563,7 +563,7 @@ class VoiceIO(ABC):
     @abstractmethod
     async def set_state(self, state: str) -> None: ...
     @abstractmethod
-    async def speak(self, text: str) -> None: ...
+    async def speak(self, text: str, more: bool = False) -> None: ...
     @abstractmethod
     async def show(self, text: str) -> None: ...
     @abstractmethod
@@ -589,8 +589,8 @@ class McpVoiceIO(VoiceIO):
     async def set_state(self, state: str) -> None:
         await self._session.call_tool("set_state", {"state": state})
 
-    async def speak(self, text: str) -> None:
-        await self._session.call_tool("speak", {"text": text})
+    async def speak(self, text: str, more: bool = False) -> None:
+        await self._session.call_tool("speak", {"text": text, "more": more})
 
     async def show(self, text: str) -> None:
         await self._session.call_tool("show", {"text": text})
@@ -695,7 +695,10 @@ async def reply_with_holding_line(io: VoiceIO, brain: Brain, text: str, *,
         line = HOLDING_LINES[holding_index % len(HOLDING_LINES)]
         log.info("slow turn -> holding line %r", line)
         try:
-            await io.speak(line)
+            # more=True: this is not the answer, so the conversation must stay
+            # open. Without it the follow-up timer starts here and the device
+            # sleeps mid-lookup.
+            await io.speak(line, more=True)
         except Exception as exc:  # never let the filler kill the real reply
             log.warning("holding line failed (%s)", exc)
     return await task

@@ -40,9 +40,14 @@ def build_mcp(hub: Hub) -> FastMCP:
             return ""
 
     @mcp.tool()
-    async def speak(text: str) -> str:
-        """Speak `text` aloud on the clawlexa device (text-to-speech)."""
-        await hub.speak(text)
+    async def speak(text: str, more: bool = False) -> str:
+        """Speak `text` aloud on the clawlexa device (text-to-speech).
+
+        Set `more=True` when this is not the answer and you are still working —
+        a holding line like "let me check on that". It keeps the conversation
+        open; otherwise the device treats it as the finished reply and starts
+        counting down to sleep while you are still busy."""
+        await hub.speak(text, more=more)
         return "ok"
 
     @mcp.tool()

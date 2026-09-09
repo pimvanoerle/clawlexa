@@ -38,6 +38,7 @@ class FakeVoiceIO(VoiceIO):
         self._utterances = list(utterances)
         self.states = []
         self.spoken = []
+        self.spoken_more = []
         self.shown = []
         self.ended_conversations = 0
         self.listens = 0
@@ -48,8 +49,9 @@ class FakeVoiceIO(VoiceIO):
     async def set_state(self, state):
         self.states.append(state)
 
-    async def speak(self, text):
+    async def speak(self, text, more=False):
         self.spoken.append(text)
+        self.spoken_more.append(more)
 
     async def show(self, text):
         self.shown.append(text)
@@ -448,7 +450,7 @@ def test_greeting_survives_a_device_that_is_not_there():
     the voice driver. (The display tidy-up on this path is covered below.)"""
     io, sensor, policy, activity, _ = greet_setup([True, False, True])
 
-    async def boom(text):
+    async def boom(text, more=False):
         raise RuntimeError("no device connected")
 
     io.speak = boom
@@ -536,7 +538,7 @@ def test_failed_greeting_does_not_leave_the_speaking_crab_up():
     looking like it's talking until the next wake word."""
     io, sensor, policy, activity, _ = greet_setup([True, False, True])
 
-    async def boom(text):
+    async def boom(text, more=False):
         raise RuntimeError("no device connected")
 
     io.speak = boom
@@ -802,7 +804,7 @@ def test_a_failed_holding_line_never_costs_us_the_reply():
     """Device unplugged mid-turn: the filler fails, the answer still arrives."""
     io = FakeVoiceIO([])
 
-    async def boom(text):
+    async def boom(text, more=False):
         raise RuntimeError("no device connected")
 
     io.speak = boom
@@ -871,3 +873,15 @@ def test_a_turn_with_no_text_at_all_returns_empty():
     fc = FakeClient([[AssistantMessage([])]])
     brain = ClaudeSessionBrain(client_factory=lambda: fc)
     assert asyncio.run(brain.reply("q")) == ""
+
+
+def test_holding_line_keeps_the_conversation_open():
+    """Live bug: the holding line went through the same speak path as a real
+    reply, so the bridge started the follow-up silence timer and re-armed the
+    wake word *mid-lookup*. The summary then played to a crab that had already
+    gone to sleep 13 seconds earlier."""
+    io = FakeVoiceIO([])
+    asyncio.run(reply_with_holding_line(io, SlowBrain(0.05), "q",
+                                        holding_after_s=0.01))
+    assert io.spoken == [HOLDING_LINES[0]]
+    assert io.spoken_more == [True], "the filler must say 'still working'"

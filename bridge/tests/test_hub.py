@@ -177,3 +177,38 @@ def test_listen_without_a_device_raises():
         assert "no device connected" in str(exc)
     else:
         raise AssertionError("expected RuntimeError with no device attached")
+
+
+def test_a_holding_line_does_not_start_the_follow_up_timer():
+    """`more=True` means "still working". Without it the Conversation treats the
+    holding line as the finished reply, starts the 12s silence window, and the
+    device re-arms its wake word while the brain is still looking something up —
+    the real answer then plays to a crab that has already gone to sleep."""
+    async def run():
+        conv = Conversation(window_s=12.0, reply_timeout_s=300.0)
+        hub = Hub(FakeTTS(), send_wav=lambda ws, path: asyncio.sleep(0))
+        hub.attach(FakeWS(), conv)
+        conv.opened()
+        conv.utterance_submitted()          # the user spoke; a reply is owed
+        await hub.speak("Let me have a look.", more=True)
+        return conv
+
+    conv = asyncio.run(run())
+    assert not conv.should_end(), "the turn must stay open while we work"
+
+
+def test_the_real_reply_does_start_the_follow_up_timer():
+    async def run():
+        conv = Conversation(window_s=12.0, reply_timeout_s=300.0)
+        hub = Hub(FakeTTS(), send_wav=lambda ws, path: asyncio.sleep(0))
+        hub.attach(FakeWS(), conv)
+        conv.opened()
+        conv.utterance_submitted()
+        await hub.speak("Here's the answer.")   # more defaults to False
+        return conv
+
+    conv = asyncio.run(run())
+    # the window is now counting silence rather than waiting on the agent
+    assert not conv.should_end()             # not yet — 12s of silence needed
+    conv._last_activity -= 13                # fast-forward past the window
+    assert conv.should_end()
