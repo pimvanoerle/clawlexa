@@ -803,16 +803,17 @@ def build_presence(args) -> tuple:
 
 async def _serve(brain: Brain, host: str, port: int, idle_timeout_s: float,
                  source=None, policy=None, greetings=None,
-                 holding_after_s: float = DEFAULT_HOLDING_AFTER_S) -> None:
+                 holding_after_s: float = DEFAULT_HOLDING_AFTER_S,
+                 mdns: bool = True) -> None:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
     # Spawn the bridge as our private MCP server (same shape an agent's MCP
     # config would use), passing the device-link host/port through.
-    params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "clawlexa_bridge", "--mcp", "--host", host, "--port", str(port)],
-    )
+    bridge_args = ["-m", "clawlexa_bridge", "--mcp", "--host", host, "--port", str(port)]
+    if not mdns:
+        bridge_args.append("--no-mdns")
+    params = StdioServerParameters(command=sys.executable, args=bridge_args)
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -923,6 +924,9 @@ def main() -> None:
                              "Use '0-0' to greet around the clock.")
     parser.add_argument("--host", default="0.0.0.0", help="device-link bind address")
     parser.add_argument("--port", type=int, default=8765, help="device-link port")
+    parser.add_argument("--no-mdns", dest="mdns", action="store_false",
+                        help="don't advertise the device link over mDNS — for running "
+                             "one bridge per device behind a router that advertises")
     args = parser.parse_args()
     args.quiet_hours = parse_quiet_hours(args.quiet_hours)
     greetings = parse_greetings(args.greeting)
@@ -950,7 +954,7 @@ def main() -> None:
     try:
         asyncio.run(_serve(brain, args.host, args.port, args.idle_timeout,
                            source=source, policy=policy, greetings=greetings,
-                           holding_after_s=args.holding_after))
+                           holding_after_s=args.holding_after, mdns=args.mdns))
     except KeyboardInterrupt:
         pass
 

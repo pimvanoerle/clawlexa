@@ -280,3 +280,38 @@ def test_mcp_mode_routes_utterance_to_hub(tmp_path, monkeypatch):
     text = asyncio.run(run())
     assert text == "turn on the lights"  # handed to the agent
     assert sent == []  # MCP mode: no auto-reply pushed to the device
+
+
+def _advertised_ports(monkeypatch, mdns):
+    """Run serve() just long enough to enter its advertise block; return the
+    ports it tried to advertise on."""
+    import contextlib
+    ports = []
+
+    @contextlib.contextmanager
+    def fake_advertise(port):
+        ports.append(port)
+        yield None
+
+    monkeypatch.setattr(server, "advertise", fake_advertise)
+
+    async def run():
+        task = asyncio.create_task(server.serve(
+            "127.0.0.1", 0, stt=FakeSTT("x"), tts=FakeTTS(), mdns=mdns))
+        await asyncio.sleep(0.2)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(run())
+    return ports
+
+
+def test_serve_advertises_by_default(monkeypatch):
+    assert _advertised_ports(monkeypatch, mdns=True) == [0]
+
+
+def test_serve_no_mdns_skips_advertising(monkeypatch):
+    # One bridge per device behind a router: only the router may advertise, or a
+    # device could discover (and dial) the wrong room's bridge.
+    assert _advertised_ports(monkeypatch, mdns=False) == []

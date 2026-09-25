@@ -6,6 +6,7 @@ frames. Binary (audio) frames are logged as a placeholder until Phase 2c.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import logging
 import re
@@ -196,7 +197,8 @@ async def handle_connection(ws: websockets.WebSocketServerProtocol,
 
 async def serve(host: str, port: int, stt: STT | None = None,
                 tts: TTS | None = None, vad_threshold: float | None = None,
-                vad_end_silence_ms: int | None = None, hub=None) -> None:
+                vad_end_silence_ms: int | None = None, hub=None,
+                mdns: bool = True) -> None:
     if stt is None:
         log.info("loading STT model (faster-whisper)...")
         stt = WhisperSTT()
@@ -213,7 +215,11 @@ async def serve(host: str, port: int, stt: STT | None = None,
                                 endpointer_factory=lambda rate: Endpointer(rate=rate, **ep_kwargs))
     log.info("clawlexa-bridge listening on ws://%s:%d", host, port)
     # Advertise over mDNS so the device can find us by service type, not a fixed
-    # IP (best-effort; the device falls back to its Kconfig BRIDGE_HOST).
-    with advertise(port):
+    # IP (best-effort; the device falls back to its Kconfig BRIDGE_HOST). Off when
+    # something else answers for us — e.g. a router fronting several bridges, one
+    # per device, where a second advertisement would let a device pick the wrong one.
+    if not mdns:
+        log.info("mDNS: advertising disabled (--no-mdns)")
+    with advertise(port) if mdns else contextlib.nullcontext():
         async with websockets.serve(handler, host, port):
             await asyncio.Future()  # run until cancelled

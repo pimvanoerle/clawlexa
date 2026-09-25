@@ -20,6 +20,9 @@ def main() -> None:
     parser.add_argument("--vad-end-silence-ms", type=int, default=None,
                         help="trailing silence that ends an utterance, ms "
                              "(default: Endpointer's 800)")
+    parser.add_argument("--no-mdns", dest="mdns", action="store_false",
+                        help="don't advertise over mDNS (e.g. when a router in front "
+                             "of several bridges does the advertising)")
     args = parser.parse_args()
 
     # Logs go to stderr — in --mcp mode stdout is the MCP protocol stream.
@@ -31,11 +34,12 @@ def main() -> None:
     try:
         if args.mcp:
             from .mcp_server import run_mcp
-            asyncio.run(run_mcp(args.host, args.port))
+            asyncio.run(run_mcp(args.host, args.port, mdns=args.mdns))
         else:
             from .server import serve
             asyncio.run(serve(args.host, args.port, vad_threshold=args.vad_threshold,
-                              vad_end_silence_ms=args.vad_end_silence_ms))
+                              vad_end_silence_ms=args.vad_end_silence_ms,
+                              mdns=args.mdns))
     except KeyboardInterrupt:
         pass
 

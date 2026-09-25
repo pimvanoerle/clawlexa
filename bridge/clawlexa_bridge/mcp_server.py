@@ -84,7 +84,7 @@ def build_mcp(hub: Hub) -> FastMCP:
 
 
 async def run_mcp(host: str, port: int, stt: STT | None = None,
-                  tts: TTS | None = None) -> None:
+                  tts: TTS | None = None, mdns: bool = True) -> None:
     """Run the device WebSocket server and the MCP (stdio) server together,
     sharing one Hub. Models load before the stdio protocol starts so their
     output can't corrupt it."""
@@ -98,6 +98,6 @@ async def run_mcp(host: str, port: int, stt: STT | None = None,
     mcp = build_mcp(hub)
     log.info("clawlexa MCP server ready (stdio); device link on ws://%s:%d", host, port)
     await asyncio.gather(
-        serve(host, port, stt=stt, tts=tts, hub=hub),
+        serve(host, port, stt=stt, tts=tts, hub=hub, mdns=mdns),
         mcp.run_stdio_async(),
     )
