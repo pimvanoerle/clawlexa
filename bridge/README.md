@@ -1,8 +1,11 @@
 # clawlexa-bridge
 
 Host-side bridge between the clawlexa ESP32 device and an MCP agent. Runs on the
-same laptop as the agent (e.g. iPinch). Phase 2: a WebSocket server the device
-dials into; STT/TTS and the MCP surface land in later phases.
+same laptop as the agent. The device dials in over WebSocket; the bridge does
+speech-to-text and text-to-speech locally and exposes the voice loop to an agent
+as MCP tools (`--mcp`). `tools/voice_agent.py` is a ready-made always-on driver
+with a Claude brain. For wiring your own agent, start at
+[docs/connect-your-agent.md](../docs/connect-your-agent.md).
 
 ## Setup
 
@@ -18,9 +21,11 @@ python3 -m venv .venv
 .venv/bin/python -m clawlexa_bridge --host 0.0.0.0 --port 8765
 ```
 
-Point the firmware at this host with `idf.py menuconfig` → **clawlexa** →
-`Bridge host` / `Bridge port` (the device dials `ws://<host>:<port>`). Use the
-laptop's LAN IP, e.g. `192.168.1.221`.
+The bridge advertises itself over mDNS (`_clawlexa._tcp`, via the OS's `dns-sd`
+or `avahi-publish-service`) and the device finds it by service type, so usually
+there's nothing to configure. As a fallback, set `idf.py menuconfig` →
+**clawlexa** → `Bridge host` / `Bridge port` to the laptop's LAN IP; the device
+uses it when discovery finds nothing.
 
 ## Test
 
@@ -38,9 +43,9 @@ presence sensor — no wake word needed to answer (SPEC §7a).
 
 ```bash
 .venv/bin/python tools/voice_agent.py \
-    --brain-cwd ~/claude --claude-cli ./node_modules/.bin/claude \
+    --brain-cwd /path/to/your/agent-vault --claude-cli /path/to/claude \
     --ha-url http://homeassistant.local:8123 \
-    --ha-entity binary_sensor.study_presence
+    --ha-entity binary_sensor.office_presence
 ```
 
 It needs a Home Assistant **long-lived access token** (Profile → Security →
@@ -60,7 +65,7 @@ When the room goes from clear to occupied — and it has been clear for
 `--away-minutes` (default 30), outside `--quiet-hours` (default `22-8`), with no
 conversation already running — the device speaks a canned time-of-day greeting
 and opens a listening window. **The greeting never wakes the Claude session**:
-walking past the study costs nothing. Only if you answer does the brain start,
+walking past the room costs nothing. Only if you answer does the brain start,
 via the normal voice loop. If you don't, the usual follow-up window times out and
 the wake word re-arms.
 
@@ -81,8 +86,8 @@ so they can't drift apart:
 
 ```bash
 .venv/bin/python tools/voice_agent.py \
-    --brain-cwd ~/claude --claude-cli ./node_modules/.bin/claude \
-    --mcp-config ~/ipinch-bot/mcp-servers.json \
+    --brain-cwd /path/to/your/agent-vault --claude-cli /path/to/claude \
+    --mcp-config /path/to/your-agent/mcp-servers.json \
     --allow-tool mcp__home-assistant__ha_get_state \
     --allow-tool mcp__gdocs__gdrive_search \
     --holding-after 4 --brain-timeout 240 --max-budget-usd 0.50
@@ -118,6 +123,22 @@ found nothing, and confidently reported the sensor didn't exist. Note that it
 failed *confidently* rather than erroring, which is the hard part to spot. A line
 in the warm prompt mapping spoken names to entity ids fixes it; that mapping is
 deployment-specific, so keep it in your launcher rather than here.
+
+## Several devices
+
+One bridge drives **one** device: its hub hands the link to whichever device
+connected most recently, so a second device on the same bridge silently takes
+over the first. For several rooms, run one bridge (or `voice_agent.py`) per
+device, each on its own port with `--no-mdns`, and put something in front that
+sends each device to its own bridge.
+
+The catch is discovery. Every device runs the same firmware, and it dials the
+*first* `_clawlexa._tcp` answer it gets, so if two bridges both advertise, a
+device can end up on the wrong one. Only one thing should advertise. A simple
+setup that works: a small TCP forwarder on `:8765` that advertises the service
+and routes each connection to `127.0.0.1:<room port>` by the device's source IP,
+with DHCP reservations for the devices. Bind the room bridges to `127.0.0.1` so
+nothing can reach them except through the forwarder.
 
 ## Troubleshooting
 
@@ -158,7 +179,7 @@ Fix, and **the order matters**:
 2. **Restart the job**, then **approve the dialog**. Once the binary has a stable
    identity macOS can finally raise the prompt — it may appear on the machine's
    own screen rather than where you're working, so go and look at it:
-   `launchctl kickstart -k gui/$(id -u)/com.ipinch.clawlexa-voice`
+   `launchctl kickstart -k gui/$(id -u)/<your job label>`
 
 3. A successful start logs
    `clawlexa.presence: Home Assistant: watching <entity> on <host>`.

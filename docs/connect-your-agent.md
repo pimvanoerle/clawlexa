@@ -1,7 +1,7 @@
 # Connect your agent to clawlexa
 
 This is the send-this-to-the-other-laptop guide: get the bridge running on the
-machine where your agent lives (e.g. iPinch), and wire your agent to clawlexa
+machine where your agent lives, and wire your agent to clawlexa
 over **MCP**. The device talks to the bridge over WiFi; your agent talks to the
 bridge over MCP. You don't need the firmware toolchain here — just Python and the
 device already flashed and on your network.
@@ -13,8 +13,10 @@ clawlexa device ──WiFi/WebSocket──> bridge (this laptop) ──MCP (stdi
 ## 1. Prerequisites
 
 - The **clawlexa device**, flashed and powered, on the **same LAN/WiFi** as this
-  laptop. (Its firmware's `Bridge host` must point at this laptop's LAN IP — set
-  via `idf.py menuconfig` → clawlexa → Bridge host, e.g. `192.168.1.221`.)
+  laptop. It finds the bridge over mDNS (`_clawlexa._tcp`), so there's normally
+  nothing to point at this machine. If your network blocks multicast, set the
+  firmware's fallback `Bridge host` to this laptop's LAN IP (`idf.py menuconfig`
+  → clawlexa → Bridge host).
 - **Python 3.10+** on this laptop.
 - ~1 GB free for the local STT/TTS models (downloaded on first run).
 
@@ -64,12 +66,14 @@ clawlexa exposes these MCP tools:
 | Tool | What it does |
 |------|--------------|
 | `wait_for_utterance(timeout_ms?)` | Blocks until the user speaks to the device (after the on-device wake word fires) and returns the transcript. Returns `""` on timeout. |
-| `speak(text)` | Speaks `text` aloud on the device (TTS). |
+| `speak(text, more?)` | Speaks `text` aloud on the device (TTS). `more=true` marks a holding line ("let me check…") so the conversation stays open while you keep working. |
+| `listen()` | Opens a listening window without the wake word, e.g. after you asked the user something unprompted. |
+| `end_conversation()` | Ends the conversation now (the user said goodbye) and re-arms the wake word, rather than waiting for the silence timeout. |
 | `set_state(state)` | Sets the device's ambient mood/indicator: `idle` \| `listening` \| `thinking` \| `speaking` \| `error`. |
 | `show(text)` | Shows a short line of text on the device screen. |
 
 Add the bridge as an MCP server in your agent's config (Claude Code / Claude
-Desktop style — adapt for iPinch):
+Desktop style — adapt for your agent):
 
 ```json
 {
@@ -173,5 +177,7 @@ works, your own agent will too — it's the same two tool calls.
 - **Wake word:** the default build wakes on **"okay nabu"**. To use a custom word
   (`clawlexa`, `okay iPinch`, …) train and swap a model — see
   [`training/README.md`](../training/README.md).
-- **One device per bridge** for now; **trust-the-LAN** (no auth yet) — fine for a
-  home network, revisit before anything hostile.
+- **One device per bridge.** For several rooms, run one bridge per device behind
+  a single advertiser. See "Several devices" in [`bridge/README.md`](../bridge/README.md).
+- **Trust-the-LAN** (no auth yet) — fine for a home network, revisit before
+  anything hostile.

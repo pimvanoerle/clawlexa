@@ -490,8 +490,8 @@ def test_parse_greetings_defaults_when_unset():
 
 
 def test_parse_greetings_overrides_only_the_times_you_name():
-    table = parse_greetings(["morning:Claws up.", "morning:Morning, Pim."])
-    assert table["morning"] == ("Claws up.", "Morning, Pim.")
+    table = parse_greetings(["morning:Claws up.", "morning:Morning, you."])
+    assert table["morning"] == ("Claws up.", "Morning, you.")
     # untouched times keep their built-in lines
     assert table["evening"] == DEFAULT_GREETINGS["evening"]
 
@@ -509,9 +509,9 @@ def test_parse_greetings_rejects_bad_input():
 
 def test_custom_greetings_reach_the_device():
     io, sensor, policy, activity, _ = greet_setup([True, False, True])
-    table = parse_greetings(["morning:Claws up, Pim."])
+    table = parse_greetings(["morning:Claws up, friend."])
     asyncio.run(greet_on_arrival(io, sensor, policy, activity, greetings=table))
-    assert io.spoken == ["Claws up, Pim."]
+    assert io.spoken == ["Claws up, friend."]
 
 
 def test_script_can_import_the_bridge_package_when_run_directly():
@@ -608,7 +608,7 @@ def test_reconciliation_never_breaks_the_running_totals():
 def test_voice_prompt_forbids_promising_to_go_and_look_things_up():
     """Live bug: the brain replied "let me pull up what we've got on that one",
     which ended the turn — there is no mechanism for it to come back and speak
-    again, so the follow-up window expired and the device went to sleep while Pim
+    again, so the follow-up window expired and the device went to sleep while the user
     sat waiting for an answer that could never arrive. Still true now that it has
     tools: the lookup has to happen *inside* the turn."""
     from tools.voice_agent import VOICE_SYSTEM_PROMPT

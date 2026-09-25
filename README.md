@@ -22,12 +22,13 @@ clawlexa runs as an MCP server on the same host as your agent, so anything that
 speaks MCP (iPinch, ourclaw, spark, Claude Desktop, …) can give itself a face
 and a voice by connecting to it.
 
-Status: **Phase 4 — the voice loop works.** Say the wake word and the device
-streams your command to the host bridge, which transcribes it (faster-whisper),
-and speaks a reply back (Piper) — all local, then it returns to silent
-listening. Hardware bring-up (display/touch/speaker/mic), WiFi transport, the
-STT↔TTS round-trip, and the on-device wake word are done and verified on
-hardware. Next: the MCP server wrapper (Phase 5) so any agent can plug in.
+Status: **in daily use.** Say the wake word and the device streams your command
+to the host bridge, which transcribes it (faster-whisper) locally, hands it to
+your agent over MCP, and speaks the reply (Piper). One wake opens a multi-turn
+conversation; the crab on the screen shows idle / listening / thinking /
+speaking. Optional extras: a Home Assistant presence greeting (walk in, it says
+hi and listens without a wake word) and a Claude voice driver that can use your
+agent's MCP tools. See [SPEC.md §12](./SPEC.md) for what's done and what's next.
 
 ### Wake word — heads up if you're cloning this 🦀
 
